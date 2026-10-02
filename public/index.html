@@ -78,6 +78,11 @@ section h2{font:600 .75rem var(--body);letter-spacing:.08em;text-transform:upper
 .foot p{margin:0}
 .foot .row{gap:14px}
 .status{font-size:.78rem;color:var(--muted)}
+.acct{display:flex;flex-direction:column;gap:8px}
+.acct form{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.acct input{flex:1 1 200px;min-width:0;font:inherit;font-size:.9rem;color:var(--fg);background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:8px 10px}
+.acct input:focus{outline:none;border-color:var(--glow)}
+.acct .btn{color:var(--fg)}
 
 .toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom,0px));transform:translate(-50%,20px);opacity:0;pointer-events:none;
   background:var(--fg);color:var(--bg);border-radius:16px;padding:10px 14px;display:flex;gap:14px;align-items:center;flex-wrap:wrap;
@@ -138,7 +143,8 @@ section h2{font:600 .75rem var(--body);letter-spacing:.08em;text-transform:upper
   </section>
 
   <div class="foot">
-    <p>Everything stays on this device. Nothing is sent anywhere, and there's no account. For an app-like icon that keeps your data safe, add this page to your home screen.</p>
+    <p id="privacy">Everything stays on this device. Nothing is sent anywhere, and there's no account. For an app-like icon that keeps your data safe, add this page to your home screen.</p>
+    <div class="acct" id="account"></div>
     <div class="row">
       <button class="link" id="exportBtn">Download backup</button>
       <button class="link" id="importBtn">Restore from backup</button>
@@ -174,34 +180,130 @@ section h2{font:600 .75rem var(--body);letter-spacing:.08em;text-transform:upper
   </div>
 </div>
 
+<script src="vendor/supabase-2.117.2.js"></script>
 <script>
 (() => {
   const $ = s => document.querySelector(s);
   const DAY = 864e5;
-  const KEY = "toy.data.v1";
+  const KEY = "toy.data.v1";                    // on-device data (signed-out mode)
+  const SYNC = "toy.sync.v1";                   // signed-in: last server view + unsent ops
+  const SUPABASE_URL = "https://kypddcfsmexknrcqxdsx.supabase.co";
+  const SUPABASE_KEY = "sb_publishable_qbS_LEB-c92G9cv76mmn4w_ZQ92zIde";
   const status = t => { $("#status").textContent = t; };
-
-  // ---- state: all data lives in localStorage on this device ----
-  let state = {friends:{}, moments:{}};
-  try{
-    const raw = localStorage.getItem(KEY);
-    if(raw){ const s = JSON.parse(raw); state = {friends:s.friends||{}, moments:s.moments||{}}; }
-  }catch{}
-  function save(){
-    try{ localStorage.setItem(KEY, JSON.stringify(state)); }
-    catch{ status("Couldn't save on this device. Storage may be full or blocked."); }
-  }
-  const view = () => state;
+  const lsGet = (k,d) => { try{ const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; }catch{ return d; } };
+  const lsSet = (k,v) => { try{ localStorage.setItem(k, JSON.stringify(v)); return true; }catch{ return false; } };
+  const empty = () => ({friends:{}, moments:{}});
   const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2,8);
 
-  function write(op){
-    const [col,id] = op.path.split("/"), bucket = state[col]; if(!bucket) return;
+  // `state` is always what the UI shows. Signed out it IS the on-device data;
+  // signed in it is the server view (`base`) with unsent ops (`queue`) replayed on top.
+  let mode = "local", user = null, sb = null;
+  let local = lsGet(KEY, empty()); local = {friends:local.friends||{}, moments:local.moments||{}};
+  let base = empty(), queue = [];
+  let state = local;
+
+  function applyOp(s, op){
+    const [col,id] = op.path.split("/"), bucket = s[col]; if(!bucket) return;
     if(op.t==="set") bucket[id] = {...op.data};
     else if(op.t==="update"){ if(bucket[id]) bucket[id] = {...bucket[id], ...op.data}; }
     else if(op.t==="delete") delete bucket[id];
-    save(); render();
+  }
+  function recompute(){
+    if(mode!=="sync") return;
+    state = {friends:{...base.friends}, moments:{...base.moments}};
+    queue.forEach(op => applyOp(state, op));
+  }
+  const saveSync = () => lsSet(SYNC, {userId:user?.id, base, queue});
+  const view = () => state;
+
+  function write(op){
+    if(mode==="sync"){ queue.push(op); recompute(); saveSync(); render(); flush(); return; }
+    applyOp(local, op);
+    if(!lsSet(KEY, local)) status("Couldn't save on this device. Storage may be full or blocked.");
+    render();
   }
   if(navigator.storage?.persist) navigator.storage.persist().catch(()=>{});
+
+  // ---- sync (Supabase) ----
+  const COLS = {friends:{name:"name", order:"ord", photo:"photo", lastAt:"last_at", createdAt:"created_at"},
+                moments:{friendId:"friend_id", at:"at", note:"note"}};
+  const toRow = (col, data) => { const r = {}; for(const [k,v] of Object.entries(data)) if(COLS[col][k]) r[COLS[col][k]] = v ?? null; return r; };
+  const fromRow = (col, row) => { const d = {}; for(const [k,c] of Object.entries(COLS[col])) if(row[c] != null) d[k] = row[c]; return d; };
+
+  let flushing = false;
+  async function flush(){
+    if(mode!=="sync" || flushing || !navigator.onLine) return; flushing = true;
+    try{
+      while(queue.length){
+        const op = queue[0], [col,id] = op.path.split("/"), t = sb.from(col);
+        const {error} = op.t==="set" ? await t.upsert({id, ...toRow(col, op.data)})
+          : op.t==="update" ? await t.update(toRow(col, op.data)).eq("id", id)
+          : await t.delete().eq("id", id);
+        if(error){
+          // 4xx (bad data) would block the queue forever; drop it. Anything else: retry later.
+          if(error.code && /^(22|23|42)/.test(error.code)) console.warn("dropped op", op, error);
+          else { status("Saved here. Will sync when back online."); break; }
+        }
+        // keep base in step so dropping the op doesn't make it flicker until the next pull
+        applyOp(base, op); queue.shift(); saveSync();
+      }
+      if(!queue.length && /sync/i.test($("#status").textContent)) status("");
+    } finally { flushing = false; }
+  }
+
+  let pulling = null;
+  async function pull(){
+    if(mode!=="sync") return;
+    if(pulling) return pulling;
+    pulling = (async () => {
+      const since = Date.now() - 400*DAY;
+      const [f, m] = await Promise.all([
+        sb.from("friends").select("*"),
+        sb.from("moments").select("*").gte("at", since).order("at", {ascending:false}).limit(5000),
+      ]);
+      if(f.error || m.error) return false;
+      base = {friends:Object.fromEntries(f.data.map(r=>[r.id, fromRow("friends", r)])),
+              moments:Object.fromEntries(m.data.map(r=>[r.id, fromRow("moments", r)]))};
+      recompute(); saveSync(); render();
+      return true;
+    })();
+    try{ return await pulling; } finally { pulling = null; }
+  }
+  let pullTimer;
+  const pullSoon = () => { clearTimeout(pullTimer); pullTimer = setTimeout(() => { if(!queue.length) pull(); else flush().then(pull); }, 400); };
+
+  async function enterSync(u){
+    user = u; mode = "sync";
+    const cached = lsGet(SYNC, null);
+    if(cached && cached.userId===u.id){ base = cached.base||empty(); queue = cached.queue||[]; }
+    else { base = empty(); queue = []; }
+    // first sign-in on this device: carry any on-device friends and moments into the account
+    if((Object.keys(local.friends).length || Object.keys(local.moments).length) && !lsGet("toy.merged."+u.id, false)){
+      for(const [id,f] of Object.entries(local.friends)) queue.push({t:"set", path:"friends/"+id, data:f});
+      for(const [id,m] of Object.entries(local.moments)) queue.push({t:"set", path:"moments/"+id, data:m});
+      lsSet("toy.merged."+u.id, true);
+    }
+    recompute(); saveSync(); renderAccount(); render();
+    if(subscribedTo!==u.id){
+      sb.removeAllChannels(); subscribedTo = u.id;
+      sb.channel("toy-"+u.id)
+        .on("postgres_changes", {event:"*", schema:"public", table:"friends"}, pullSoon)
+        .on("postgres_changes", {event:"*", schema:"public", table:"moments"}, pullSoon)
+        .subscribe();
+    }
+    await flush(); await pull();
+  }
+  let subscribedTo = null;
+  function leaveSync(){
+    subscribedTo = null; mode = "local"; user = null; base = empty(); queue = []; state = local;
+    try{ localStorage.removeItem(SYNC); }catch{}
+    sb?.removeAllChannels(); renderAccount(); render();
+  }
+  addEventListener("online", () => { flush(); pullSoon(); });
+  document.addEventListener("visibilitychange", () => { if(document.visibilityState==="visible") pullSoon(); });
+  setInterval(() => queue.length && flush(), 20000);
+  // safety net if the realtime socket drops: refresh every minute while the page is visible
+  setInterval(() => { if(mode==="sync" && document.visibilityState==="visible") pullSoon(); }, 60000);
 
   // ---- actions ----
   function logThought(fid, el, ev){
@@ -451,10 +553,83 @@ section h2{font:600 .75rem var(--body);letter-spacing:.08em;text-transform:upper
     try{
       const d = JSON.parse(await file.text());
       if(!d || typeof d.friends!=="object" || typeof d.moments!=="object") throw 0;
+      if(mode==="sync"){
+        if(!confirm("Add everything in this backup to your synced account?")) return;
+        for(const [id,f] of Object.entries(d.friends)) queue.push({t:"set", path:"friends/"+id, data:f});
+        for(const [id,m] of Object.entries(d.moments)) queue.push({t:"set", path:"moments/"+id, data:m});
+        recompute(); saveSync(); render(); flush(); status("Backup added to your account.");
+        return;
+      }
       if(!confirm("Replace what's on this device with the backup?")) return;
-      state = {friends:d.friends, moments:d.moments}; save(); render(); status("Backup restored.");
+      local = {friends:d.friends, moments:d.moments}; state = local; lsSet(KEY, local); render(); status("Backup restored.");
     }catch{ status("That doesn't look like a Thinking of You backup."); }
   };
+
+  // ---- account: optional email sign-in for sync ----
+  const PRIVACY_LOCAL = "Everything stays on this device. Nothing is sent anywhere, and there's no account. For an app-like icon that keeps your data safe, add this page to your home screen.";
+  const PRIVACY_SYNC = "Synced to your account, so your phone and laptop share one list. Only you can see it.";
+  let signInStep = null, signInEmail = "";
+  function renderAccount(){
+    const box = $("#account"); box.innerHTML = "";
+    $("#privacy").textContent = mode==="sync" ? PRIVACY_SYNC : PRIVACY_LOCAL;
+    if(!sb) return;
+    if(mode==="sync"){
+      const row = document.createElement("div"); row.className = "row";
+      const who = document.createElement("span"); who.textContent = "Signed in as " + (user.email || "you");
+      const out = document.createElement("button"); out.className = "link"; out.textContent = "Sign out";
+      out.onclick = async () => { await sb.auth.signOut().catch(()=>{}); leaveSync(); status("Signed out. Showing what's saved on this device."); };
+      row.append(who, out); box.append(row); return;
+    }
+    if(!signInStep){
+      const b = document.createElement("button"); b.className = "link"; b.textContent = "Sync across devices: sign in with email";
+      b.onclick = () => { signInStep = "email"; renderAccount(); $("#acctEmail")?.focus(); };
+      box.append(b); return;
+    }
+    const form = document.createElement("form");
+    const inp = document.createElement("input");
+    const go = document.createElement("button"); go.className = "btn"; go.type = "submit";
+    const cancel = document.createElement("button"); cancel.className = "link"; cancel.type = "button"; cancel.textContent = "Cancel";
+    cancel.onclick = () => { signInStep = null; renderAccount(); };
+    if(signInStep==="email"){
+      inp.type = "email"; inp.id = "acctEmail"; inp.placeholder = "you@example.com"; inp.autocomplete = "email"; inp.required = true; inp.value = signInEmail;
+      go.textContent = "Email me a code";
+      form.onsubmit = async e => {
+        e.preventDefault(); signInEmail = inp.value.trim(); go.disabled = true; status("Sending…");
+        const {error} = await sb.auth.signInWithOtp({email:signInEmail, options:{emailRedirectTo: location.origin + location.pathname}});
+        go.disabled = false;
+        if(error){ status(error.message || "Couldn't send the email. Try again."); return; }
+        status(`Sent to ${signInEmail}. Type the code here, or tap the link in the email.`);
+        signInStep = "code"; renderAccount(); $("#acctCode")?.focus();
+      };
+    } else {
+      inp.id = "acctCode"; inp.inputMode = "numeric"; inp.autocomplete = "one-time-code"; inp.placeholder = "Code from the email"; inp.required = true;
+      go.textContent = "Sign in";
+      form.onsubmit = async e => {
+        e.preventDefault(); go.disabled = true; status("Checking…");
+        const {data, error} = await sb.auth.verifyOtp({email:signInEmail, token:inp.value.replace(/\s/g,""), type:"email"});
+        go.disabled = false;
+        if(error){ status("That code didn't work. Check it, or send a new one."); return; }
+        signInStep = null; status(""); enterSync(data.user);
+      };
+    }
+    form.append(inp, go, cancel); box.append(form);
+  }
+
+  async function startAuth(){
+    if(!window.supabase || SUPABASE_URL.startsWith("__")) return;
+    sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {auth:{persistSession:true, autoRefreshToken:true, detectSessionInUrl:true}});
+    // show cached synced data straight away (works offline) while the session is confirmed
+    const cached = lsGet(SYNC, null);
+    if(cached?.userId){ mode = "sync"; user = {id:cached.userId}; base = cached.base||empty(); queue = cached.queue||[]; recompute(); render(); }
+    sb.auth.onAuthStateChange((ev, session) => {
+      if(session?.user && (mode!=="sync" || !user?.email || user.id!==session.user.id)) setTimeout(() => enterSync(session.user), 0);
+      if(ev==="SIGNED_OUT" && mode==="sync") leaveSync();
+    });
+    const {data} = await sb.auth.getSession();
+    if(data.session?.user){ await enterSync(data.session.user); }
+    else if(cached?.userId && navigator.onLine){ leaveSync(); }
+    renderAccount();
+  }
 
   // ---- bubble show ----
   const HUES = [200, 330, 42, 160, 270, 12, 95, 235, 300, 180];
@@ -605,7 +780,9 @@ section h2{font:600 .75rem var(--body);letter-spacing:.08em;text-transform:upper
 
   setInterval(render, 60000);
   render();
-  quickLog();
+  renderAccount();
+  // quick-log needs the friend list, so wait for sign-in / first pull when synced
+  startAuth().catch(()=>{}).finally(quickLog);
 
   if("serviceWorker" in navigator) addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(()=>{}));
 })();
