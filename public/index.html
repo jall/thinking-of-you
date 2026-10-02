@@ -44,6 +44,11 @@ h1{font:700 1.6rem/1.1 var(--display);margin:0;text-wrap:balance}
   user-select:none;-webkit-user-select:none;transition:transform .12s ease}
 .tile:active{transform:scale(.97)}
 .tile .name{font:700 1.2rem/1.15 var(--display);overflow-wrap:anywhere}
+.tile .head{display:flex;align-items:center;gap:10px;min-width:0;padding-right:14px}
+.avatar{width:40px;height:40px;border-radius:50%;object-fit:cover;flex-shrink:0;background:var(--dot)}
+.photo-btn{width:40px;height:40px;border-radius:50%;flex-shrink:0;border:1px dashed var(--muted);background:var(--bg) center/cover no-repeat;
+  color:var(--muted);font:500 .7rem var(--body);cursor:pointer;padding:0}
+.tile.editing .head{padding-right:0}
 .tile .key{position:absolute;top:12px;right:14px;font-size:.72rem;color:var(--muted);opacity:.7}
 .tile .meta{font-size:.78rem;color:var(--muted);font-variant-numeric:tabular-nums}
 .dots{display:flex;gap:5px}
@@ -139,6 +144,7 @@ section h2{font:600 .75rem var(--body);letter-spacing:.08em;text-transform:upper
       <button class="link" id="importBtn">Restore from backup</button>
     </div>
     <input type="file" id="importFile" accept="application/json,.json" hidden>
+    <input type="file" id="photoFile" accept="image/*" hidden>
     <div class="status" id="status" role="status"></div>
   </div>
 </div>
@@ -250,6 +256,64 @@ section h2{font:600 .75rem var(--body);letter-spacing:.08em;text-transform:upper
     write({t:"set", path:"friends/"+uid(), data:{name, order, createdAt:Date.now()}});
   }
 
+  // photos: center-cropped, downscaled to a small JPEG so localStorage stays light (~10KB each)
+  let photoFor = null;
+  function pickPhoto(fid){ photoFor = fid; $("#photoFile").click(); }
+  $("#photoFile").onchange = async e => {
+    const file = e.target.files[0]; e.target.value = ""; const fid = photoFor; photoFor = null;
+    if(!file || !fid) return;
+    try{
+      const bmp = await createImageBitmap(file);
+      const S = 192, side = Math.min(bmp.width, bmp.height);
+      const c = document.createElement("canvas"); c.width = c.height = S;
+      c.getContext("2d").drawImage(bmp, (bmp.width-side)/2, (bmp.height-side)/2, side, side, 0, 0, S, S);
+      write({t:"update", path:"friends/"+fid, data:{photo:c.toDataURL("image/jpeg", 0.8)}});
+    }catch{ status("Couldn't read that photo. Try a JPEG or PNG."); }
+  };
+
+  // quick log from a link, e.g. a Siri Shortcut opening ?thought=sophie, wondering how her exam went
+  // (also accepts ?friend=sophie&note=...). Matches names case-insensitively, then by first word / prefix.
+  function quickLog(){
+    const q = new URLSearchParams(location.search);
+    let who = q.get("friend"), note = q.get("note") || "";
+    const raw = q.get("thought");
+    if(raw != null && !who){
+      const m = raw.trim().replace(/^(i'?m\s+)?thinking (of|about)\s+/i, "").match(/^([^,.:;\-–—]+)[,.:;\-–—]?\s*(.*)$/s);
+      if(m){ who = m[1]; note = note || m[2]; }
+    }
+    if(!who) return;
+    history.replaceState(null, "", location.pathname);
+    who = who.trim().toLowerCase(); note = note.trim();
+    const fs = Object.entries(state.friends).map(([id,f])=>({id,...f}));
+    const norm = s => s.toLowerCase().trim();
+    // longest-name-first so "Sam" doesn't win over "Sam K" when both exist
+    const byLen = [...fs].sort((a,b)=>b.name.length-a.name.length);
+    let f = fs.find(f => norm(f.name)===who)
+      || byLen.find(f => who.startsWith(norm(f.name)+" "))
+      || fs.find(f => norm(f.name).split(/\s+/)[0]===who.split(/\s+/)[0])
+      || (who.length>=3 && fs.find(f => norm(f.name).startsWith(who)));
+    if(f && !note && who.startsWith(norm(f.name)+" ")) note = who.slice(norm(f.name).length).trim();
+    if(!f){
+      const t = $("#toast"); t.innerHTML = "";
+      const msg = document.createElement("span"); msg.textContent = `No friend called “${who}”`;
+      const add = document.createElement("button"); add.textContent = "Add them";
+      add.onclick = () => {
+        const name = who.replace(/\b\w/g, c => c.toUpperCase());
+        addFriend(name);
+        const nf = Object.entries(state.friends).find(([,x]) => x.name===name);
+        if(nf){ logThought(nf[0]); if(note) addNoteTo(nf[0], note); }
+      };
+      t.append(msg, add); t.classList.add("on"); setTimeout(()=>t.classList.remove("on"), 8000);
+      return;
+    }
+    logThought(f.id);
+    if(note) addNoteTo(f.id, note);
+  }
+  function addNoteTo(fid, note){
+    const last = Object.entries(state.moments).filter(([,m])=>m.friendId===fid).sort((a,b)=>b[1].at-a[1].at)[0];
+    if(last) write({t:"set", path:"moments/"+last[0], data:{...last[1], note}});
+  }
+
   // ---- render ----
   const ago = ms => {
     if(!ms) return "not yet";
@@ -293,15 +357,26 @@ section h2{font:600 .75rem var(--body);letter-spacing:.08em;text-transform:upper
           del.dataset.armed = 1; del.textContent = "Tap again to remove";
           setTimeout(()=>{ del.textContent="Remove"; delete del.dataset.armed; }, 3000);
         };
-        row.append(up, del); el.append(inp, row); grid.append(el);
+        const pic = document.createElement("button"); pic.className = "photo-btn"; pic.type = "button";
+        pic.setAttribute("aria-label", f.photo ? `Change photo of ${f.name}` : `Add photo of ${f.name}`);
+        if(f.photo) pic.style.backgroundImage = `url("${f.photo}")`; else pic.textContent = "Photo";
+        pic.onclick = () => pickPhoto(f.id);
+        if(f.photo){
+          const rm = document.createElement("button"); rm.className="link"; rm.textContent="No photo";
+          rm.onclick = () => write({t:"update", path:"friends/"+f.id, data:{photo:null}});
+          row.append(rm);
+        }
+        const head = document.createElement("div"); head.className = "head"; head.append(pic, inp);
+        row.prepend(up); row.append(del); el.append(head, row); grid.append(el);
         return;
       }
       const el = document.createElement("button"); el.className = "tile"; el.type="button"; el.dataset.id = f.id;
       const days = [...Array(7)].map((_,k)=>{ const d0 = today-(6-k)*DAY; return mine.some(m=>m.at>=d0 && m.at<d0+DAY); });
-      el.innerHTML = `<span class="bloom"></span><span class="name"></span>${i<9?`<span class="key">${i+1}</span>`:""}
+      el.innerHTML = `<span class="bloom"></span><span class="head">${f.photo?`<img class="avatar" alt="">`:""}<span class="name"></span></span>${i<9?`<span class="key">${i+1}</span>`:""}
         <span><span class="dots">${days.map(on=>`<i class="${on?"on":""}"></i>`).join("")}</span>
         <span class="meta">${week} this week · ${ago(f.lastAt)}</span></span>`;
       el.querySelector(".name").textContent = f.name;
+      if(f.photo) el.querySelector(".avatar").src = f.photo;
       el.setAttribute("aria-label", `Thinking of ${f.name}`);
       el.onclick = ev => logThought(f.id, el, ev);
       grid.append(el);
@@ -410,8 +485,10 @@ section h2{font:600 .75rem var(--body);letter-spacing:.08em;text-transform:upper
     }
     const hue = {}; friends.forEach((f,i)=>hue[f.id]=HUES[i%HUES.length]);
     const name = Object.fromEntries(friends.map(f=>[f.id,f.name]));
+    const img = {};
+    friends.forEach(f => { if(f.photo){ const im = new Image(); im.src = f.photo; img[f.id] = im; } });
     moments = moments.filter(m=>name[m.friendId]).sort((a,b)=>a.at-b.at);
-    return {friends, moments, hue, name, start, end};
+    return {friends, moments, hue, name, img, start, end};
   }
 
   function renderChips(d){
@@ -427,11 +504,11 @@ section h2{font:600 .75rem var(--body);letter-spacing:.08em;text-transform:upper
   }
 
   function spawn(m, d){
-    const R = Math.random, r = 14 + R()*16 + (sel==="all"?0:4);
+    const R = Math.random, r = 14 + R()*16 + (sel==="all"?0:4) + (d.img[m.friendId]?8:0);
     bubbles.push({
       x: W*(0.04 + R()*0.66), y: H + r + R()*30, r,
       vy: -(36 + R()*38), vx: 14 + R()*34,
-      ph: R()*6.28, hue: d.hue[m.friendId], label: sel==="all" ? d.name[m.friendId] : "", born: performance.now()
+      ph: R()*6.28, hue: d.hue[m.friendId], label: sel==="all" ? d.name[m.friendId] : "", img: d.img[m.friendId], born: performance.now()
     });
   }
 
@@ -441,6 +518,10 @@ section h2{font:600 .75rem var(--body);letter-spacing:.08em;text-transform:upper
     g.addColorStop(0, `hsla(${b.hue},90%,85%,0.04)`);
     g.addColorStop(0.75, `hsla(${b.hue},85%,78%,0.18)`);
     g.addColorStop(1, `hsla(${b.hue},90%,82%,0.55)`);
+    if(b.img && b.img.complete && b.img.naturalWidth){
+      ctx.save(); ctx.beginPath(); ctx.arc(b.x,b.y,r*.92,0,6.283); ctx.clip();
+      ctx.globalAlpha = 0.55; ctx.drawImage(b.img, b.x-r, b.y-r, r*2, r*2); ctx.restore();
+    }
     ctx.beginPath(); ctx.arc(b.x,b.y,r,0,6.283); ctx.fillStyle = g; ctx.fill();
     ctx.lineWidth = 1; ctx.strokeStyle = `hsla(${(b.hue+40)%360},90%,90%,0.55)`; ctx.stroke();
     ctx.beginPath(); ctx.ellipse(b.x - r*.38, b.y - r*.42, r*.26, r*.13, -0.7, 0, 6.283); ctx.fillStyle = "rgba(255,255,255,0.7)"; ctx.fill();
@@ -524,6 +605,7 @@ section h2{font:600 .75rem var(--body);letter-spacing:.08em;text-transform:upper
 
   setInterval(render, 60000);
   render();
+  quickLog();
 
   if("serviceWorker" in navigator) addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(()=>{}));
 })();
