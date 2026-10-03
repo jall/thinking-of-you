@@ -28,7 +28,7 @@ html,body{height:100%}
 body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.45 var(--body);-webkit-tap-highlight-color:transparent;
   padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
 [hidden]{display:none!important}
-.wrap{max-width:720px;margin:0 auto;padding:0 16px;padding-block:28px 120px;display:flex;flex-direction:column;gap:28px}
+.wrap{max-width:720px;margin:0 auto;padding:0 16px;padding-block:28px 32px;display:flex;flex-direction:column;gap:28px;min-height:100vh;min-height:100svh}
 header{display:flex;align-items:baseline;justify-content:space-between;gap:12px;flex-wrap:wrap}
 header .row{flex-wrap:nowrap;flex-shrink:0}
 h1{font:700 1.6rem/1.1 var(--display);margin:0;text-wrap:balance}
@@ -74,7 +74,7 @@ section h2{font:600 .75rem var(--body);letter-spacing:.08em;text-transform:upper
 .entry .note{color:var(--muted);min-width:0;overflow-wrap:anywhere}
 .entry .x{margin-left:auto}
 
-.foot{color:var(--muted);font-size:.8rem;display:flex;flex-direction:column;gap:8px;max-width:52ch}
+.foot{color:var(--muted);font-size:.78rem;display:flex;flex-direction:column;gap:8px;max-width:52ch;margin-top:auto;padding-top:48px;opacity:.85}
 .foot p{margin:0}
 .foot .row{gap:14px}
 .status{font-size:.78rem;color:var(--muted)}
@@ -106,7 +106,9 @@ section h2{font:600 .75rem var(--body);letter-spacing:.08em;text-transform:upper
 .show .bar{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
 .show h2{font:700 1.35rem/1.2 var(--display);margin:0;text-wrap:balance;letter-spacing:0;text-transform:none;color:inherit}
 .show .range{font-size:.82rem;opacity:.7;margin-top:4px}
-.chips{display:flex;gap:8px;flex-wrap:wrap;transition:opacity .4s ease}
+.chips{display:flex;flex-direction:column;gap:8px;transition:opacity .4s ease}
+.chiprow{display:flex;gap:8px;flex-wrap:wrap}
+.chiprow+.chiprow{padding-top:2px}
 .chip{font:500 .85rem var(--body);color:#f4efe6;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.2);border-radius:999px;padding:5px 12px;cursor:pointer}
 .chip[aria-pressed="true"]{background:#f4efe6;color:#2b2d57;border-color:#f4efe6}
 .show .close{background:none;border:0;color:#f4efe6;font:400 1.6rem/1 var(--body);cursor:pointer;padding:0 4px;opacity:.8}
@@ -121,6 +123,11 @@ section h2{font:600 .75rem var(--body);letter-spacing:.08em;text-transform:upper
   font:700 clamp(1.5rem,5vw,2.4rem)/1.25 var(--display);text-wrap:balance;opacity:0;transition:opacity 1.6s ease;text-shadow:0 2px 24px rgba(20,20,50,.6)}
 .finale small{display:block;font:400 .95rem/1.4 var(--body);opacity:.8;margin-top:10px}
 .finale.on{opacity:1}
+.recpill{display:none;position:absolute;z-index:2;left:50%;bottom:calc(84px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);
+  font:600 .8rem var(--body);color:#fff;background:rgba(180,40,50,.85);border:0;border-radius:999px;padding:7px 14px;cursor:pointer}
+.show.recording .top,.show.recording .bottom,.show.recording .finale{visibility:hidden}
+.show.recording .recpill{display:block}
+.ctrls{flex-wrap:wrap}
 .example{font:500 .8rem var(--body);color:#f6d38b;background:none;border:0;text-decoration:underline;text-underline-offset:3px;cursor:pointer;padding:0}
 @media (prefers-reduced-motion:reduce){.finale,.show .top,.show .bottom{transition:none}}
 </style></head><body>
@@ -177,9 +184,11 @@ section h2{font:600 .75rem var(--body);letter-spacing:.08em;text-transform:upper
     <div class="ctrls">
       <button class="play" id="playBtn">Play</button>
       <span class="clock" id="clock"></span>
+      <button class="example" id="recBtn" hidden>Save as video</button>
       <button class="example" id="exampleBtn" hidden>Try with example bubbles</button>
     </div>
   </div>
+  <button class="recpill" id="recStop" aria-label="Stop recording">● Recording · tap to cancel</button>
 </div>
 
 <script src="vendor/supabase-2.117.2.js"></script>
@@ -280,10 +289,10 @@ section h2{font:600 .75rem var(--body);letter-spacing:.08em;text-transform:upper
     if(mode!=="sync") return;
     if(pulling) return pulling;
     pulling = (async () => {
-      const since = Date.now() - 400*DAY;
+      const since = 0;
       const [f, m] = await Promise.all([
         sb.from("friends").select("*"),
-        sb.from("moments").select("*").gte("at", since).order("at", {ascending:false}).limit(5000),
+        sb.from("moments").select("*").gte("at", since).order("at", {ascending:false}).limit(20000),
       ]);
       if(f.error || m.error) return false;
       base = {friends:Object.fromEntries(f.data.map(r=>[r.id, fromRow("friends", r)])),
@@ -665,9 +674,12 @@ section h2{font:600 .75rem var(--body);letter-spacing:.08em;text-transform:upper
 
   // ---- bubble show ----
   const HUES = [200, 330, 42, 160, 270, 12, 95, 235, 300, 180];
+  const SPANS = {week:{label:"Week", days:7, phrase:"this week"}, month:{label:"Month", days:30, phrase:"this month"},
+                 year:{label:"Year", days:365, phrase:"this year"}, all:{label:"All time", days:null, phrase:null}};
   const show = $("#show"), sky = $("#sky"), ctx = sky.getContext("2d");
-  let W=0, H=0, raf=0, bubbles=[], sel="all", example=false;
-  let play = null;
+  let W=0, H=0, raf=0, bubbles=[], sel="all", example=false, span = lsGet("toy.span", "week");
+  if(!SPANS[span]) span = "week";
+  let play = null, rec = null;
   const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
 
   function size(){
@@ -675,7 +687,7 @@ section h2{font:600 .75rem var(--body);letter-spacing:.08em;text-transform:upper
     W = show.clientWidth; H = show.clientHeight;
     sky.width = W*dpr; sky.height = H*dpr; ctx.setTransform(dpr,0,0,dpr,0,0);
   }
-  addEventListener("resize", () => { if(!show.hidden) size(); });
+  addEventListener("resize", () => { if(!show.hidden && !rec) size(); });
 
   const hash = str => { let h = 2166136261; for(const c of str){ h ^= c.charCodeAt(0); h = Math.imul(h,16777619); }
     h ^= h>>>16; h = Math.imul(h,0x85ebca6b); h ^= h>>>13; h = Math.imul(h,0xc2b2ae35); h ^= h>>>16; return (h>>>0)/4294967295; };
@@ -683,39 +695,65 @@ section h2{font:600 .75rem var(--body);letter-spacing:.08em;text-transform:upper
   function showData(){
     const s = view();
     let friends = Object.entries(s.friends).map(([id,f])=>({id,...f})).sort((a,b)=>(a.order||0)-(b.order||0));
-    const end = Date.now(), start = startOfDay(end) - 6*DAY;
-    let moments = Object.entries(s.moments).map(([id,m])=>({id,...m})).filter(m=>m.at>=start && m.at<=end);
+    const end = Date.now(), sp = SPANS[span];
+    const from = sp.days ? (span==="week" ? startOfDay(end) - 6*DAY : end - sp.days*DAY) : 0;
+    let moments = Object.entries(s.moments).map(([id,m])=>({id,...m})).filter(m=>m.at>=from && m.at<=end);
     if(example){
+      const ex0 = sp.days ? from : end - 90*DAY, n = {week:34, month:120, year:400, all:500}[span];
       friends = ["Ana","Tom","Priya","Sam"].map((n,i)=>({id:"ex"+i, name:n, order:i}));
       moments = [];
-      for(let k=0;k<34;k++) moments.push({id:"exm"+k, friendId:"ex"+Math.floor(hash("f"+k)*4), at:start + hash("m"+k)*(end-start)});
+      for(let k=0;k<n;k++) moments.push({id:"exm"+k, friendId:"ex"+Math.floor(hash("f"+k)*4), at:ex0 + hash("m"+k)*(end-ex0)});
     }
     const hue = {}; friends.forEach((f,i)=>hue[f.id]=HUES[i%HUES.length]);
     const name = Object.fromEntries(friends.map(f=>[f.id,f.name]));
     const img = {};
     friends.forEach(f => { if(f.photo){ const im = new Image(); im.src = f.photo; img[f.id] = im; } });
     moments = moments.filter(m=>name[m.friendId]).sort((a,b)=>a.at-b.at);
-    return {friends, moments, hue, name, img, start, end};
+    return {friends, moments, hue, name, img, from, end};
   }
+
+  // Replay only the stretch that has moments in it, so a quiet week doesn't mean waiting through empty days.
+  function window_(list, d){
+    if(!list.length) return {start:d.from || d.end - 7*DAY, end:d.end};
+    const first = list[0].at, pad = Math.max(3600e3, (d.end - first)*0.04);
+    return {start: Math.max(d.from, first - pad), end: d.end};
+  }
+  function ticks(start, end){
+    const len = end - start, n = 5, out = [];
+    const fmt = len <= 2*DAY ? {hour:"numeric"} : len <= 14*DAY ? {weekday:"short"}
+      : len <= 120*DAY ? {day:"numeric", month:"short"} : len <= 400*DAY ? {month:"short"} : {month:"short", year:"2-digit"};
+    for(let k=0;k<n;k++) out.push(new Date(start + (k/(n-1))*len).toLocaleString(undefined, fmt));
+    return out;
+  }
+  const fmtDay = t => new Date(t).toLocaleDateString(undefined,{day:"numeric",month:"short"});
+  const fmtClock = (t, len) => new Date(t).toLocaleString(undefined, len <= 14*DAY ? {weekday:"short",hour:"2-digit",minute:"2-digit"} : {day:"numeric",month:"short",year:len>400*DAY?"numeric":undefined});
 
   function renderChips(d){
     const box = $("#chips"); box.innerHTML = "";
-    const mk = (id,label) => { const b = document.createElement("button"); b.className="chip"; b.textContent=label;
-      b.setAttribute("aria-pressed", sel===id); b.onclick = e => { e.stopPropagation(); sel=id; openShow(); }; box.append(b); };
-    if(d.friends.length > 1) mk("all","Everyone");
-    d.friends.forEach(f => mk(f.id, f.name));
+    const mk = (row, on, label, fn) => { const b = document.createElement("button"); b.className="chip"; b.textContent=label;
+      b.setAttribute("aria-pressed", on); b.onclick = e => { e.stopPropagation(); fn(); }; row.append(b); };
+    const r1 = document.createElement("div"); r1.className = "chiprow";
+    for(const [k,v] of Object.entries(SPANS)) mk(r1, span===k, v.label, () => { span = k; lsSet("toy.span", k); openShow(); });
+    const r2 = document.createElement("div"); r2.className = "chiprow";
+    if(d.friends.length > 1) mk(r2, sel==="all", "Everyone", () => { sel = "all"; openShow(); });
+    d.friends.forEach(f => mk(r2, sel===f.id, f.name, () => { sel = f.id; openShow(); }));
+    box.append(r1, r2);
+  }
+  function renderTrack(win){
     const days = $("#days"); days.innerHTML = "";
-    for(let k=0;k<7;k++){ const sp=document.createElement("span"); sp.textContent=new Date(d.start+k*DAY+DAY/2).toLocaleDateString(undefined,{weekday:"short"}); days.append(sp); }
-    const fmt = t => new Date(t).toLocaleDateString(undefined,{day:"numeric",month:"short"});
-    $("#showRange").textContent = `${fmt(d.start)} – ${fmt(d.end)}${example?" · example":""}`;
+    ticks(win.start, win.end).forEach(t => { const sp = document.createElement("span"); sp.textContent = t; days.append(sp); });
+    const a = fmtDay(win.start), z = fmtDay(win.end);
+    $("#showRange").textContent = `${a===z ? a : a+" – "+z}${example?" · example":""}`;
   }
 
-  function spawn(m, d){
-    const R = Math.random, r = 14 + R()*16 + (sel==="all"?0:4) + (d.img[m.friendId]?8:0);
+  function spawn(m, d, n){
+    const R = Math.random, shrink = n > 250 ? 0.6 : n > 100 ? 0.8 : 1;
+    const r = (14 + R()*16 + (sel==="all"?0:4) + (d.img[m.friendId]?8:0)) * shrink;
     bubbles.push({
       x: W*(0.04 + R()*0.66), y: H + r + R()*30, r,
       vy: -(36 + R()*38), vx: 14 + R()*34,
-      ph: R()*6.28, hue: d.hue[m.friendId], label: sel==="all" ? d.name[m.friendId] : "", img: d.img[m.friendId], born: performance.now()
+      ph: R()*6.28, hue: d.hue[m.friendId], label: sel==="all" && n <= 60 ? d.name[m.friendId] : "", img: d.img[m.friendId],
+      born: performance.now(), out: false, wait: 0
     });
   }
 
@@ -739,50 +777,99 @@ section h2{font:600 .75rem var(--body);letter-spacing:.08em;text-transform:upper
     }
   }
 
-  let last = 0, ambientAt = 0, D = null;
+  // While recording, the DOM overlays are hidden and everything is painted into the canvas instead.
+  function wrapLines(text, maxW){
+    const words = text.split(" "), lines = []; let line = "";
+    for(const w of words){ const t = line ? line+" "+w : w; if(ctx.measureText(t).width > maxW && line){ lines.push(line); line = w; } else line = t; }
+    if(line) lines.push(line); return lines;
+  }
+  function paintBackdrop(){
+    const g = ctx.createLinearGradient(0,0,0,H);
+    [[0,"#1b2140"],[.45,"#2b2d57"],[.8,"#5a4a73"],[1,"#8a6a7c"]].forEach(([o,c]) => g.addColorStop(o,c));
+    ctx.fillStyle = g; ctx.fillRect(0,0,W,H);
+  }
+  function paintOverlay(now){
+    const pad = 20; ctx.textAlign = "left"; ctx.textBaseline = "alphabetic"; ctx.fillStyle = "#f4efe6";
+    ctx.font = `700 ${Math.min(26, W/16)}px "Gowun Batang", Georgia, serif`;
+    let y = pad + 26;
+    for(const l of wrapLines($("#showTitle").textContent, W - pad*2)){ ctx.fillText(l, pad, y); y += 30; }
+    ctx.globalAlpha = .7; ctx.font = `400 13px Figtree, system-ui, sans-serif`; ctx.fillText($("#showRange").textContent, pad, y); ctx.globalAlpha = 1;
+    const ty = H - 54, p = play ? Math.min(1, (now - play.t0)/play.dur) : 0;
+    ctx.fillStyle = "rgba(255,255,255,.18)"; ctx.fillRect(pad, ty, W - pad*2, 2);
+    ctx.fillStyle = "#f6d38b"; ctx.fillRect(pad, ty, (W - pad*2)*p, 2);
+    ctx.fillStyle = "rgba(244,239,230,.6)"; ctx.font = `400 11px Figtree, system-ui, sans-serif`;
+    const tk = play ? ticks(play.start, play.end) : [];
+    tk.forEach((t,k) => { ctx.textAlign = k===0 ? "left" : k===tk.length-1 ? "right" : "center"; ctx.fillText(t, pad + (k/(tk.length-1))*(W-pad*2), ty + 18); });
+    ctx.textAlign = "left"; ctx.fillStyle = "rgba(244,239,230,.8)"; ctx.font = `400 13px Figtree, system-ui, sans-serif`;
+    ctx.fillText($("#clock").textContent, pad, H - 16);
+    ctx.textAlign = "right"; ctx.fillStyle = "rgba(244,239,230,.45)"; ctx.fillText("thinking-of-you.jall.me", W - pad, H - 16);
+    if(play?.done && play.msg){
+      const a = Math.min(1, (now - play.doneAt)/1600); ctx.globalAlpha = a; ctx.textAlign = "center"; ctx.fillStyle = "#f4efe6";
+      const glow = ctx.createRadialGradient(W/2, H/2, 0, W/2, H/2, W*.6);
+      glow.addColorStop(0, "rgba(20,20,50,.35)"); glow.addColorStop(1, "rgba(20,20,50,0)");
+      ctx.fillStyle = glow; ctx.fillRect(0, H/2 - W*.6, W, W*1.2); ctx.fillStyle = "#f4efe6";
+      const fs = Math.max(24, Math.min(38, W/14)); ctx.font = `700 ${fs}px "Gowun Batang", Georgia, serif`;
+      const lines = wrapLines(play.msg[0], W - 48); let yy = H/2 - (lines.length*fs*1.25)/2;
+      for(const l of lines){ ctx.fillText(l, W/2, yy + fs); yy += fs*1.25; }
+      ctx.font = `400 15px Figtree, system-ui, sans-serif`; ctx.globalAlpha = a*.8;
+      for(const l of wrapLines(play.msg[1], W - 64)){ ctx.fillText(l, W/2, yy + 26); yy += 21; }
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  let last = 0, D = null;
   function frame(now){
     raf = requestAnimationFrame(frame);
     const dt = Math.min(0.05, (now - (last||now))/1000); last = now;
     const speed = reduced ? 0.5 : 1;
     if(play && !play.done){
       const p = Math.min(1, (now - play.t0)/play.dur), tp = play.start + p*(play.end-play.start);
-      while(play.next < play.list.length && play.list[play.next].at <= tp) spawn(play.list[play.next++], D);
+      while(play.next < play.list.length && play.list[play.next].at <= tp) spawn(play.list[play.next++], D, play.list.length);
       $("#fill").style.width = (p*100)+"%";
-      $("#clock").textContent = new Date(tp).toLocaleString(undefined,{weekday:"short",hour:"2-digit",minute:"2-digit"});
-      if(p>=1){ play.done = true; finale(); }
-    } else if(play && play.done && play.list.length && now > ambientAt){
-      spawn(play.list[Math.floor(Math.random()*play.list.length)], D);
-      ambientAt = now + 900 + Math.random()*1400;
+      $("#clock").textContent = fmtClock(tp, play.end - play.start);
+      if(p>=1){ play.done = true; play.doneAt = now; finale(); }
     }
-    ctx.clearRect(0,0,W,H);
+    if(rec) paintBackdrop(); else ctx.clearRect(0,0,W,H);
     const gust = Math.sin(now/2300)*12 + Math.sin(now/900)*5;
-    bubbles = bubbles.filter(b => b.y > -b.r*3 && b.x < W + b.r*3);
     for(const b of bubbles){
+      if(b.out){
+        // after the replay, bubbles that drifted off come back round, so what's on screen is always the real moments
+        if(!play?.done) continue;
+        if(!b.wait){ b.wait = now + Math.random()*5000; continue; }
+        if(now < b.wait) continue;
+        Object.assign(b, {out:false, wait:0, x: W*(0.04 + Math.random()*0.66), y: H + b.r + Math.random()*30, born: now});
+      }
       b.y += b.vy*dt*speed;
       b.x += (b.vx + gust + Math.sin(now/700 + b.ph)*10)*dt*speed;
+      if(b.y < -b.r*3 || b.x > W + b.r*3){ b.out = true; continue; }
       drawBubble(b, now);
     }
+    if(rec) paintOverlay(now);
   }
 
   const esc = t => t.replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
   function finale(){
     const n = play.list.length, f = $("#finale");
     const who = sel==="all" ? null : D.name[sel];
-    if(!n){ f.innerHTML = ""; return; }
-    const times = n===1 ? "once" : `${n} times`;
-    f.innerHTML = who
-      ? `I thought of you ${times} this week, ${esc(who)}.<small>Each bubble is a moment you crossed my mind.</small>`
-      : `I thought of you all ${times} this week.<small>Each bubble is a moment one of you crossed my mind.</small>`;
+    if(!n){ f.innerHTML = ""; play.msg = null; return; }
+    const times = n===1 ? "once" : `${n.toLocaleString()} times`;
+    const when = SPANS[span].phrase || `since ${new Date(play.list[0].at).toLocaleDateString(undefined,{month:"long", year:"numeric"})}`;
+    const line = who ? `I thought of you ${times} ${when}, ${who}.` : `I thought of you all ${times} ${when}.`;
+    const sub = who ? "Each bubble is a moment you crossed my mind." : "Each bubble is a moment one of you crossed my mind.";
+    play.msg = [line, sub];
+    f.innerHTML = `${esc(line)}<small>${sub}</small>`;
     f.classList.add("on");
     show.classList.remove("quiet");
+    if(rec) setTimeout(stopRecording, 4500);
   }
 
   function startPlay(){
     D = showData();
     const list = D.moments.filter(m => sel==="all" || m.friendId===sel);
+    const win = window_(list, D); renderTrack(win);
     bubbles = []; $("#finale").classList.remove("on");
-    const dur = Math.max(12000, Math.min(30000, 8000 + list.length*400));
-    play = {t0: performance.now(), dur, list, next:0, start:D.start, end:D.end, done:false};
+    const dur = Math.max(10000, Math.min(30000, 8000 + list.length*250));
+    play = {t0: performance.now(), dur, list, next:0, start:win.start, end:win.end, done:false, msg:null};
     $("#playBtn").textContent = "Replay";
     show.classList.add("quiet");
   }
@@ -792,22 +879,53 @@ section h2{font:600 .75rem var(--body);letter-spacing:.08em;text-transform:upper
     if(sel!=="all" && !D.name[sel]) sel = "all";
     if(sel==="all" && D.friends.length===1) sel = D.friends[0].id;
     renderChips(D);
-    const has = D.moments.length > 0;
+    const list = D.moments.filter(m => sel==="all" || m.friendId===sel), has = list.length > 0;
+    renderTrack(window_(list, D));
     $("#exampleBtn").hidden = has && !example;
     $("#exampleBtn").textContent = example ? "Back to my bubbles" : "Try with example bubbles";
+    $("#recBtn").hidden = !has || !canRecord();
     $("#showTitle").textContent = sel==="all" || !D.name[sel] ? "Every time you crossed my mind" : `Every time I thought of ${D.name[sel]}`;
-    $("#clock").textContent = has ? "" : "No moments yet this week";
+    $("#clock").textContent = has ? "" : `No moments ${SPANS[span].phrase || "yet"}`;
     show.hidden = false; size();
     if(!raf) raf = requestAnimationFrame(frame);
     if(has) startPlay(); else { play = null; bubbles = []; $("#fill").style.width="0"; $("#finale").classList.remove("on"); show.classList.remove("quiet"); }
   }
-  function closeShow(){ show.hidden = true; cancelAnimationFrame(raf); raf = 0; last = 0; play = null; bubbles = []; example = false; }
+  function closeShow(){ if(rec) stopRecording(true); show.hidden = true; cancelAnimationFrame(raf); raf = 0; last = 0; play = null; bubbles = []; example = false; }
+
+  // ---- save the replay as a video ----
+  // H.264 MP4 first (plays everywhere, incl. iPhone Photos); else WebM. Plain "video/mp4" can mean VP9-in-MP4, which iOS can't play.
+  const MIMES = ["video/mp4;codecs=avc1.42E01F", "video/mp4;codecs=avc1.4D401F", "video/mp4;codecs=avc1", "video/webm;codecs=vp9", "video/webm", "video/mp4"];
+  const canRecord = () => !!(window.MediaRecorder && sky.captureStream && MIMES.some(m => MediaRecorder.isTypeSupported(m)));
+  function startRecording(){
+    if(!canRecord()) return;
+    const mime = MIMES.find(m => MediaRecorder.isTypeSupported(m));
+    const chunks = [], r = new MediaRecorder(sky.captureStream(30), {mimeType:mime, videoBitsPerSecond:6e6});
+    r.ondataavailable = e => e.data.size && chunks.push(e.data);
+    r.onstop = () => {
+      if(r.cancelled) return;
+      const ext = mime.startsWith("video/mp4") ? "mp4" : "webm";
+      const file = new File(chunks, `thinking-of-you-${span}.${ext}`, {type:mime.split(";")[0]});
+      if(navigator.canShare?.({files:[file]})) navigator.share({files:[file]}).catch(()=>download(file));
+      else download(file);
+    };
+    rec = r; show.classList.add("recording"); r.start(250); startPlay();
+  }
+  function download(file){
+    const a = document.createElement("a"); a.href = URL.createObjectURL(file); a.download = file.name;
+    document.body.append(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(a.href), 5000);
+  }
+  function stopRecording(cancel){
+    if(!rec) return; const r = rec; rec = null; r.cancelled = !!cancel;
+    show.classList.remove("recording"); try{ r.stop(); }catch{}
+  }
 
   $("#showBtn").onclick = () => { sel = "all"; openShow(); };
   $("#showClose").onclick = e => { e.stopPropagation(); closeShow(); };
-  $("#playBtn").onclick = e => { e.stopPropagation(); if(showData().moments.length) startPlay(); };
+  $("#playBtn").onclick = e => { e.stopPropagation(); if(D?.moments.length) startPlay(); };
+  $("#recBtn").onclick = e => { e.stopPropagation(); startRecording(); };
+  $("#recStop").onclick = e => { e.stopPropagation(); stopRecording(true); };
   $("#exampleBtn").onclick = e => { e.stopPropagation(); example = !example; sel = "all"; openShow(); };
-  show.addEventListener("click", () => show.classList.toggle("quiet"));
+  show.addEventListener("click", () => { if(!rec) show.classList.toggle("quiet"); });
   addEventListener("keydown", e => { if(e.key==="Escape" && !show.hidden) closeShow(); });
 
   setInterval(render, 60000);
