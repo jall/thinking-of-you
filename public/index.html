@@ -78,7 +78,9 @@ section h2{font:600 .75rem var(--body);letter-spacing:.08em;text-transform:upper
 .foot p{margin:0}
 .foot .row{gap:14px}
 .status{font-size:.78rem;color:var(--muted)}
-.acct{display:flex;flex-direction:column;gap:8px}
+.acct{display:flex;flex-direction:column;align-items:flex-start;gap:8px}
+.acct form{align-self:stretch}
+.acct .link{text-align:left}
 .acct form{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
 .acct input{flex:1 1 200px;min-width:0;font:inherit;font-size:.9rem;color:var(--fg);background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:8px 10px}
 .acct input:focus{outline:none;border-color:var(--glow)}
@@ -198,7 +200,29 @@ section h2{font:600 .75rem var(--body);letter-spacing:.08em;text-transform:upper
   // `state` is always what the UI shows. Signed out it IS the on-device data;
   // signed in it is the server view (`base`) with unsent ops (`queue`) replayed on top.
   let mode = "local", user = null, sb = null;
+  // The site moved from thinking-of-you-onyy.netlify.app to the jall.me domain. Browsers keep
+  // separate storage per address, so the old address hands its on-device data over in the URL.
+  const HOME = "thinking-of-you.jall.me";
+  if(/\.netlify\.app$/.test(location.hostname)){
+    let hash = "";
+    try{
+      const raw = localStorage.getItem(KEY);
+      if(raw && raw.length > 30) hash = "#carry=" + encodeURIComponent(btoa(unescape(encodeURIComponent(raw))));
+    }catch{}
+    location.replace("https://" + HOME + "/" + location.search + hash);
+    return;
+  }
   let local = lsGet(KEY, empty()); local = {friends:local.friends||{}, moments:local.moments||{}};
+  if(location.hash.startsWith("#carry=")){
+    try{
+      const d = JSON.parse(decodeURIComponent(escape(atob(decodeURIComponent(location.hash.slice(7))))));
+      local = {friends:{...(d.friends||{}), ...local.friends}, moments:{...(d.moments||{}), ...local.moments}};
+      lsSet(KEY, local);
+      // let the next sign-in carry these into the account too
+      Object.keys(localStorage).filter(k => k.startsWith("toy.merged.")).forEach(k => localStorage.removeItem(k));
+    }catch{}
+    history.replaceState(null, "", location.pathname + location.search);
+  }
   let base = empty(), queue = [];
   let state = local;
 
@@ -592,23 +616,31 @@ section h2{font:600 .75rem var(--body);letter-spacing:.08em;text-transform:upper
     cancel.onclick = () => { signInStep = null; renderAccount(); };
     if(signInStep==="email"){
       inp.type = "email"; inp.id = "acctEmail"; inp.placeholder = "you@example.com"; inp.autocomplete = "email"; inp.required = true; inp.value = signInEmail;
-      go.textContent = "Email me a code";
+      go.textContent = "Email me a link";
       form.onsubmit = async e => {
         e.preventDefault(); signInEmail = inp.value.trim(); go.disabled = true; status("Sending…");
         const {error} = await sb.auth.signInWithOtp({email:signInEmail, options:{emailRedirectTo: location.origin + location.pathname}});
         go.disabled = false;
         if(error){ status(error.message || "Couldn't send the email. Try again."); return; }
-        status(`Sent to ${signInEmail}. Type the code here, or tap the link in the email.`);
+        status(`Sent to ${signInEmail}. Tap the link in the email, or on a home-screen app, long-press it, copy, and paste it here.`);
         signInStep = "code"; renderAccount(); $("#acctCode")?.focus();
       };
     } else {
-      inp.id = "acctCode"; inp.inputMode = "numeric"; inp.autocomplete = "one-time-code"; inp.placeholder = "Code from the email"; inp.required = true;
+      inp.id = "acctCode"; inp.autocomplete = "one-time-code"; inp.placeholder = "Paste the email's link here"; inp.required = true;
       go.textContent = "Sign in";
       form.onsubmit = async e => {
         e.preventDefault(); go.disabled = true; status("Checking…");
-        const {data, error} = await sb.auth.verifyOtp({email:signInEmail, token:inp.value.replace(/\s/g,""), type:"email"});
+        // Accept the sign-in link itself (long-press it in the email, copy, paste here) so a
+        // home-screen app can sign in without the link opening Safari. A 6-digit code works too.
+        const v = inp.value.trim();
+        let args = {email:signInEmail, token:v.replace(/\s/g,""), type:"email"};
+        try{
+          const u = new URL(v), th = u.searchParams.get("token_hash") || u.searchParams.get("token");
+          if(th) args = {token_hash:th, type:u.searchParams.get("type")==="signup" ? "signup" : "magiclink"};
+        }catch{}
+        const {data, error} = await sb.auth.verifyOtp(args);
         go.disabled = false;
-        if(error){ status("That code didn't work. Check it, or send a new one."); return; }
+        if(error){ status("That didn't work. Links only work once and expire after an hour, so send a new one if needed."); return; }
         signInStep = null; status(""); enterSync(data.user);
       };
     }
