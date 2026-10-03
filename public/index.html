@@ -38,29 +38,58 @@ h1{font:700 1.6rem/1.1 var(--display);margin:0;text-wrap:balance}
 .btn[aria-pressed="true"]{color:var(--fg);border-color:var(--fg)}
 :focus-visible{outline:2px solid var(--glow);outline-offset:2px}
 
-.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px}
-.tile{position:relative;overflow:hidden;min-height:112px;border:1px solid var(--line);background:var(--surface);border-radius:18px;
-  padding:14px 14px 12px;text-align:left;cursor:pointer;color:var(--fg);font:inherit;display:flex;flex-direction:column;justify-content:space-between;gap:10px;
-  user-select:none;-webkit-user-select:none;transition:transform .12s ease}
-.tile:active{transform:scale(.97)}
-.tile .name{font:700 1.2rem/1.15 var(--display);overflow-wrap:anywhere}
-.tile .head{display:flex;align-items:center;gap:10px;min-width:0;padding-right:14px}
-.avatar{width:40px;height:40px;border-radius:50%;object-fit:cover;flex-shrink:0;background:var(--dot)}
-.photo-btn{width:40px;height:40px;border-radius:50%;flex-shrink:0;border:1px dashed var(--muted);background:var(--bg) center/cover no-repeat;
-  color:var(--muted);font:500 .7rem var(--body);cursor:pointer;padding:0}
-.tile.editing .head{padding-right:0}
-.tile .key{position:absolute;top:12px;right:14px;font-size:.72rem;color:var(--muted);opacity:.7}
-.tile .meta{font-size:.78rem;color:var(--muted);font-variant-numeric:tabular-nums}
-.dots{display:flex;gap:5px}
-.dots i{width:8px;height:8px;border-radius:50%;background:var(--dot)}
-.dots i.on{background:var(--glow)}
-.bloom{position:absolute;inset:0;pointer-events:none;background:radial-gradient(circle at var(--x,50%) var(--y,50%),var(--glow-soft) 0,transparent 70%);opacity:0}
-.tile.lit .bloom{animation:bloom 1.1s ease-out}
-@keyframes bloom{0%{opacity:1;transform:scale(.4)}100%{opacity:0;transform:scale(1.6)}}
-.tile.add{border-style:dashed;background:transparent;color:var(--muted);align-items:flex-start;justify-content:center;cursor:default}
-.tile.editing{cursor:default}
-.tile input{font:700 1.1rem var(--display);width:100%;background:transparent;border:0;border-bottom:1px solid var(--line);color:var(--fg);padding:2px 0}
-.tile input:focus{outline:none;border-bottom-color:var(--glow)}
+/* friends as floating bubbles: warmer (recently thought-of) friends sit higher and a little larger */
+:root{--o1:98%;--o2:91%;--o3:81%;--osat:72%;--oedge:70%;--oink:38%}
+@media (prefers-color-scheme:dark){:root{--o1:36%;--o2:24%;--o3:17%;--osat:42%;--oedge:52%;--oink:84%}}
+.grid{display:flex;flex-wrap:wrap;justify-content:center;align-items:flex-start;gap:14px 12px;padding-top:4px}
+.bub{position:relative;width:calc(var(--s) + 14px);padding:var(--dy,0) 0 0;background:none;border:0;color:var(--fg);font:inherit;cursor:pointer;
+  display:flex;flex-direction:column;align-items:center;gap:7px;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;touch-action:manipulation}
+.bub .orb{position:relative;width:var(--s);height:var(--s);border-radius:50%;display:grid;place-items:center;overflow:hidden;
+  background:radial-gradient(circle at 34% 28%,hsl(var(--h) var(--osat) var(--o1)) 0,hsl(var(--h) var(--osat) var(--o2)) 55%,hsl(var(--h) calc(var(--osat) - 15%) var(--o3)) 100%);
+  border:1.5px solid hsl(var(--h) 50% var(--oedge) / .85);
+  box-shadow:0 10px 22px -12px hsl(var(--h) 40% 30% / .45),inset 0 -8px 18px hsl(var(--h) 60% 60% / .18);
+  animation:bob 7s ease-in-out var(--bd,0s) infinite alternate;transition:transform .15s ease}
+.bub:active .orb{transform:scale(.94)}
+.bub .orb img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;pointer-events:none;-webkit-user-drag:none}
+.bub .orb::after{content:"";position:absolute;left:18%;top:14%;width:30%;height:15%;border-radius:50%;background:rgba(255,255,255,.62);transform:rotate(-35deg);pointer-events:none}
+.bub .initial{font:700 calc(var(--s) * .4)/1 var(--display);color:hsl(var(--h) 45% var(--oink))}
+.bub .name{font:700 1.02rem/1.15 var(--display);text-align:center;overflow-wrap:anywhere;max-width:100%}
+.bub .meta{font-size:.72rem;color:var(--muted);text-align:center;font-variant-numeric:tabular-nums;margin-top:-4px}
+.bub .key{position:absolute;top:calc(var(--dy,0px) + 2px);right:2px;font-size:.68rem;color:var(--muted);opacity:0}
+@media (hover:hover){.bub .key{opacity:.6}}
+.bub .ripple{position:absolute;inset:-2px;border-radius:50%;border:2px solid hsl(var(--h) 70% 65%);opacity:0;pointer-events:none}
+.bub.lit .ripple{animation:ripple .9s ease-out}
+@keyframes ripple{0%{opacity:.9;transform:scale(.9)}100%{opacity:0;transform:scale(1.45)}}
+@keyframes bob{from{translate:0 -3px}to{translate:0 3px}}
+.rise{position:fixed;z-index:40;width:22px;height:22px;margin:-11px 0 0 -11px;border-radius:50%;pointer-events:none;
+  background:radial-gradient(circle at 35% 30%,#fff 0,hsl(var(--h) 80% 80% / .5) 60%,hsl(var(--h) 80% 70% / .8) 100%);border:1px solid hsl(var(--h) 70% 70%);
+  animation:rise 1.4s cubic-bezier(.3,.6,.4,1) forwards}
+@keyframes rise{0%{opacity:0;transform:translate(0,0) scale(.4)}15%{opacity:1}100%{opacity:0;transform:translate(var(--rx,10px),-160px) scale(1.1)}}
+.bub.add .orb{background:transparent;border:1.5px dashed var(--line);box-shadow:none;animation:none}
+.bub.add .orb::after{display:none}
+.bub.add input{width:80%;text-align:center;font:500 .95rem var(--body);background:transparent;border:0;border-bottom:1px solid var(--line);color:var(--fg);padding:3px 0}
+.bub.add input:focus{outline:none;border-bottom-color:var(--glow)}
+@media (prefers-reduced-motion:reduce){.bub .orb{animation:none}.bub.lit .ripple,.rise{animation:none;display:none}}
+
+/* hold-to-edit sheet */
+dialog.sheet{border:0;padding:20px 16px calc(20px + env(safe-area-inset-bottom,0px));margin:auto auto 0;width:100%;max-width:520px;
+  border-radius:22px 22px 0 0;background:var(--surface);color:var(--fg);box-shadow:0 -10px 40px rgba(0,0,0,.18)}
+@media (min-width:600px){dialog.sheet{margin:auto;border-radius:22px;padding-bottom:20px}}
+dialog.sheet::backdrop{background:rgba(20,22,30,.35)}
+.sheet form{display:flex;flex-direction:column;gap:14px}
+.sheet .top{display:flex;gap:14px;align-items:center}
+.sheet .orbbtn{flex-shrink:0;width:72px;height:72px;border-radius:50%;border:1.5px dashed var(--muted);background:var(--bg) center/cover no-repeat;
+  color:var(--muted);font:500 .75rem var(--body);cursor:pointer;padding:0}
+.sheet .orbbtn.has{border-style:solid;border-color:var(--line)}
+.sheet input,.sheet textarea{width:100%;font:inherit;color:var(--fg);background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:10px 12px}
+.sheet input.title{font:700 1.25rem var(--display)}
+.sheet textarea{min-height:84px;resize:vertical}
+.sheet input:focus,.sheet textarea:focus{outline:none;border-color:var(--glow)}
+.sheet .hint{font-size:.82rem;color:var(--muted);margin:0}
+.sheet .actions{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+.sheet .btn.primary{color:var(--bg);background:var(--fg);border-color:var(--fg)}
+.entry{cursor:pointer;-webkit-touch-callout:none}
+.entry:hover .who{text-decoration:underline;text-underline-offset:3px}
 .row{display:flex;gap:8px;flex-wrap:wrap}
 .link{background:none;border:0;padding:0;font:500 .8rem var(--body);color:var(--muted);cursor:pointer;text-decoration:underline;text-underline-offset:3px}
 .link.danger{color:#b4553f}
@@ -93,7 +122,7 @@ section h2{font:600 .75rem var(--body);letter-spacing:.08em;text-transform:upper
 .toast button{background:none;border:0;color:var(--glow);font:600 .9rem var(--body);cursor:pointer;padding:4px 2px}
 .toast input{flex:1 1 180px;min-width:0;background:transparent;border:0;border-bottom:1px solid var(--muted);color:var(--bg);font:inherit;padding:4px 0}
 .toast input:focus{outline:none;border-bottom-color:var(--glow)}
-@media (prefers-reduced-motion:reduce){.tile.lit .bloom{animation:none}.toast{transition:none}}
+@media (prefers-reduced-motion:reduce){.toast{transition:none}}
 
 /* bubble show: a deliberate single dusk look, same in both themes */
 .show{position:fixed;inset:0;z-index:50;background:linear-gradient(180deg,#1b2140 0%,#2b2d57 45%,#5a4a73 80%,#8a6a7c 100%);color:#f4efe6;
@@ -140,7 +169,6 @@ section h2{font:600 .75rem var(--body);letter-spacing:.08em;text-transform:upper
     </div>
     <div class="row">
       <button class="btn" id="showBtn">Look back</button>
-      <button class="btn" id="editBtn" aria-pressed="false">Edit</button>
     </div>
   </header>
 
@@ -165,6 +193,8 @@ section h2{font:600 .75rem var(--body);letter-spacing:.08em;text-transform:upper
 </div>
 
 <div class="toast" id="toast" role="status"></div>
+
+<dialog class="sheet" id="sheet"><form method="dialog" id="sheetForm"></form></dialog>
 
 <div class="show" id="show" hidden>
   <canvas id="sky"></canvas>
@@ -204,6 +234,7 @@ section h2{font:600 .75rem var(--body);letter-spacing:.08em;text-transform:upper
   const lsGet = (k,d) => { try{ const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; }catch{ return d; } };
   const lsSet = (k,v) => { try{ localStorage.setItem(k, JSON.stringify(v)); return true; }catch{ return false; } };
   const empty = () => ({friends:{}, moments:{}});
+  const HUES = [200, 330, 42, 160, 270, 12, 95, 235, 300, 180];
   const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2,8);
 
   // `state` is always what the UI shows. Signed out it IS the on-device data;
@@ -339,16 +370,19 @@ section h2{font:600 .75rem var(--body);letter-spacing:.08em;text-transform:upper
   setInterval(() => { if(mode==="sync" && document.visibilityState==="visible") pullSoon(); }, 60000);
 
   // ---- actions ----
-  function logThought(fid, el, ev){
+  function logThought(fid){
     const f = state.friends[fid]; if(!f) return;
     const at = Date.now(), mid = uid(), prevLast = f.lastAt || null;
+    orderHoldUntil = at + 1300; setTimeout(render, 1350);   // let it float up after a beat
     write({t:"set", path:"moments/"+mid, data:{friendId:fid, at}});
     write({t:"update", path:"friends/"+fid, data:{lastAt:at}});
-    const tile = [...document.querySelectorAll("#grid .tile")].find(t => t.dataset.id===fid) || el;
-    if(tile){
-      const r = tile.getBoundingClientRect();
-      if(ev && ev.clientX){ tile.style.setProperty("--x",(ev.clientX-r.left)+"px"); tile.style.setProperty("--y",(ev.clientY-r.top)+"px"); }
-      tile.classList.remove("lit"); void tile.offsetWidth; tile.classList.add("lit");
+    const bub = document.querySelector(`#grid .bub[data-id="${CSS.escape(fid)}"]`);
+    if(bub){
+      bub.classList.remove("lit"); void bub.offsetWidth; bub.classList.add("lit");
+      const r = bub.querySelector(".orb").getBoundingClientRect();
+      const up = document.createElement("span"); up.className = "rise";
+      up.style.cssText = `left:${r.left + r.width/2}px;top:${r.top + r.height*.3}px;--h:${bub.style.getPropertyValue("--h")};--rx:${Math.round((Math.random()-.5)*40)}px`;
+      document.body.append(up); setTimeout(() => up.remove(), 1500);
     }
     if(navigator.vibrate) try{navigator.vibrate(12)}catch{}
     showToast(f.name, mid, fid, prevLast);
@@ -403,6 +437,7 @@ section h2{font:600 .75rem var(--body);letter-spacing:.08em;text-transform:upper
       const c = document.createElement("canvas"); c.width = c.height = S;
       c.getContext("2d").drawImage(bmp, (bmp.width-side)/2, (bmp.height-side)/2, side, side, 0, 0, S, S);
       write({t:"update", path:"friends/"+fid, data:{photo:c.toDataURL("image/jpeg", 0.8)}});
+      if(sheet.open) openFriendSheet(fid);
     }catch{ status("Couldn't read that photo. Try a JPEG or PNG."); }
   };
 
@@ -460,76 +495,75 @@ section h2{font:600 .75rem var(--body);letter-spacing:.08em;text-transform:upper
   };
   const startOfDay = t => { const d = new Date(t); d.setHours(0,0,0,0); return d.getTime(); };
 
-  let editing = false;
+  // ---- friends as bubbles ----
+  // Warmth: each moment counts 1 when fresh and halves every ~2 days, so whoever's been on your mind lately floats up.
+  const HALF = 2*DAY;
+  const warmthOf = (fid, moments, now) => moments.reduce((w,m) => m.friendId===fid && now-m.at < 60*DAY ? w + Math.pow(.5, (now-m.at)/HALF) : w, 0);
+  // stable per-friend colour (same one Look back uses) and a bit of organic jitter
+  const hueMap = friends => Object.fromEntries([...friends].sort((a,b)=>(a.order||0)-(b.order||0)).map((f,i)=>[f.id, HUES[i%HUES.length]]));
+  const hash01 = s => { let h = 2166136261; for(const c of s){ h ^= c.charCodeAt(0); h = Math.imul(h,16777619); } return ((h>>>0)%1000)/1000; };
+
+  let orderHoldUntil = 0, lastOrder = [];
   function render(){
-    const s = view();
-    const friends = Object.entries(s.friends).map(([id,f])=>({id,...f})).sort((a,b)=>(a.order||0)-(b.order||0));
+    const s = view(), now = Date.now();
+    const friends = Object.entries(s.friends).map(([id,f])=>({id,...f}));
     const moments = Object.entries(s.moments).map(([id,m])=>({id,...m})).sort((a,b)=>b.at-a.at);
-    const today = startOfDay(Date.now());
+    const today = startOfDay(now);
+    const hue = hueMap(friends);
+    const warm = Object.fromEntries(friends.map(f => [f.id, warmthOf(f.id, moments, now)]));
+    const maxW = Math.max(1, ...Object.values(warm));
+    const ranked = [...friends].sort((a,b) => warm[b.id]-warm[a.id] || (b.lastAt||0)-(a.lastAt||0) || (a.order||0)-(b.order||0)).map(f=>f.id);
+    // right after a tap, hold the order still for a beat so the bubble doesn't jump out from under your finger
+    let order = ranked;
+    if(now < orderHoldUntil && lastOrder.length) order = [...lastOrder.filter(id => s.friends[id]), ...ranked.filter(id => !lastOrder.includes(id))];
+    lastOrder = order;
+
     const grid = $("#grid");
-    const keep = {}; grid.querySelectorAll("input").forEach(i => keep[i.id] = i.value);
-    const focusId = grid.contains(document.activeElement) ? document.activeElement.id : null;
+    const before = {}; grid.querySelectorAll(".bub[data-id]").forEach(el => before[el.dataset.id] = el.getBoundingClientRect());
+    const addVal = $("#addInput")?.value || "", addFocused = document.activeElement?.id === "addInput";
     grid.innerHTML = "";
 
     const todayCount = moments.filter(m=>m.at>=today).length;
-    $("#sub").textContent = todayCount ? `${todayCount} moment${todayCount>1?"s":""} of appreciation today.` : "Tap a name when someone crosses your mind.";
+    $("#sub").textContent = todayCount ? `${todayCount} moment${todayCount>1?"s":""} of appreciation today.`
+      : friends.length ? "Tap someone when they cross your mind. Hold to edit." : "Add the people you want to think of.";
 
-    friends.forEach((f,i) => {
-      const mine = moments.filter(m=>m.friendId===f.id);
-      const week = mine.filter(m=>m.at >= today-6*DAY).length;
-      if(editing){
-        const el = document.createElement("div"); el.className = "tile editing";
-        const inp = document.createElement("input"); inp.id = "name-"+f.id; inp.value = f.name; inp.setAttribute("aria-label","Name");
-        inp.onchange = () => { const v = inp.value.trim(); if(v && v!==f.name) write({t:"update", path:"friends/"+f.id, data:{name:v}}); };
-        const row = document.createElement("div"); row.className="row";
-        const up = document.createElement("button"); up.className="link"; up.textContent="Move up"; up.hidden = i===0;
-        up.onclick = () => { const p = friends[i-1];
-          write({t:"update", path:"friends/"+f.id, data:{order:p.order||0}});
-          write({t:"update", path:"friends/"+p.id, data:{order:f.order||0}}); };
-        const del = document.createElement("button"); del.className="link danger"; del.textContent="Remove";
-        del.onclick = () => {
-          if(del.dataset.armed){ write({t:"delete", path:"friends/"+f.id}); return; }
-          del.dataset.armed = 1; del.textContent = "Tap again to remove";
-          setTimeout(()=>{ del.textContent="Remove"; delete del.dataset.armed; }, 3000);
-        };
-        const pic = document.createElement("button"); pic.className = "photo-btn"; pic.type = "button";
-        pic.setAttribute("aria-label", f.photo ? `Change photo of ${f.name}` : `Add photo of ${f.name}`);
-        if(f.photo) pic.style.backgroundImage = `url("${f.photo}")`; else pic.textContent = "Photo";
-        pic.onclick = () => pickPhoto(f.id);
-        if(f.photo){
-          const rm = document.createElement("button"); rm.className="link"; rm.textContent="No photo";
-          rm.onclick = () => write({t:"update", path:"friends/"+f.id, data:{photo:null}});
-          row.append(rm);
-        }
-        const head = document.createElement("div"); head.className = "head"; head.append(pic, inp);
-        row.prepend(up); row.append(del); el.append(head, row); grid.append(el);
-        return;
-      }
-      const el = document.createElement("button"); el.className = "tile"; el.type="button"; el.dataset.id = f.id;
-      const days = [...Array(7)].map((_,k)=>{ const d0 = today-(6-k)*DAY; return mine.some(m=>m.at>=d0 && m.at<d0+DAY); });
-      el.innerHTML = `<span class="bloom"></span><span class="head">${f.photo?`<img class="avatar" alt="">`:""}<span class="name"></span></span>${i<9?`<span class="key">${i+1}</span>`:""}
-        <span><span class="dots">${days.map(on=>`<i class="${on?"on":""}"></i>`).join("")}</span>
-        <span class="meta">${week} this week · ${ago(f.lastAt)}</span></span>`;
+    const small = innerWidth < 380;
+    order.forEach((id,i) => {
+      const f = s.friends[id]; if(!f) return;
+      const week = moments.filter(m=>m.friendId===id && m.at >= today-6*DAY).length;
+      const size = Math.round((small ? 84 : 92) + (small ? 34 : 44) * Math.sqrt(warm[id]/maxW));
+      const el = document.createElement("button"); el.type = "button"; el.className = "bub"; el.dataset.id = id;
+      el.style.cssText = `--h:${hue[id]};--s:${size}px;--dy:${Math.round(hash01(id)*14)}px;--bd:${(-hash01(id+"b")*7).toFixed(2)}s`;
+      el.innerHTML = `<span class="orb">${f.photo?`<img alt="" draggable="false">`:`<span class="initial"></span>`}<span class="ripple"></span></span>
+        <span class="name"></span><span class="meta"></span>${i<9?`<span class="key">${i+1}</span>`:""}`;
+      if(f.photo) el.querySelector("img").src = f.photo; else el.querySelector(".initial").textContent = [...f.name.trim()][0]?.toUpperCase() || "?";
       el.querySelector(".name").textContent = f.name;
-      if(f.photo) el.querySelector(".avatar").src = f.photo;
-      el.setAttribute("aria-label", `Thinking of ${f.name}`);
-      el.onclick = ev => logThought(f.id, el, ev);
+      el.querySelector(".meta").textContent = week ? `${week} this week · ${ago(f.lastAt)}` : ago(f.lastAt);
+      el.setAttribute("aria-label", `Thinking of ${f.name}. Hold to edit.`);
+      holdable(el, () => logThought(id), () => openFriendSheet(id));
       grid.append(el);
     });
 
-    const add = document.createElement("div"); add.className = "tile add";
-    const inp = document.createElement("input"); inp.id = "addInput"; inp.placeholder = "+ Add a friend"; inp.setAttribute("aria-label","Add a friend");
-    inp.style.fontFamily = "var(--body)"; inp.style.fontWeight = "500"; inp.style.fontSize = "1rem";
+    const add = document.createElement("div"); add.className = "bub add"; add.style.cssText = "--h:40;--s:" + (small ? 84 : 92) + "px";
+    const orb = document.createElement("span"); orb.className = "orb";
+    const inp = document.createElement("input"); inp.id = "addInput"; inp.placeholder = "+ Add"; inp.setAttribute("aria-label","Add a friend"); inp.value = addVal;
     inp.onkeydown = e => { if(e.key==="Enter"){ const v=inp.value; inp.value=""; addFriend(v); setTimeout(()=>$("#addInput")?.focus(),0);} };
     inp.onblur = () => { const v=inp.value; if(v.trim()){ inp.value=""; addFriend(v); } };
-    add.append(inp);
-    if(!friends.length){
-      const hint = document.createElement("div"); hint.className="meta"; hint.textContent="Type a name, then Enter";
-      add.append(hint);
-    }
+    orb.append(inp); add.append(orb);
+    if(!friends.length){ const hint = document.createElement("span"); hint.className="meta"; hint.style.marginTop = "0"; hint.textContent="Type a name, then Enter"; add.append(hint); }
     grid.append(add);
-    grid.querySelectorAll("input").forEach(i => { if(keep[i.id] !== undefined) i.value = keep[i.id]; });
-    if(focusId) document.getElementById(focusId)?.focus();
+    if(addFocused) inp.focus();
+
+    // FLIP: glide bubbles from where they were to where they are now
+    if(!reducedMotion) grid.querySelectorAll(".bub[data-id]").forEach(el => {
+      const a = before[el.dataset.id]; if(!a) return;
+      const b = el.getBoundingClientRect(), dx = a.left - b.left, dy = a.top - b.top;
+      if(Math.abs(dx) < 1 && Math.abs(dy) < 1) return;
+      el.style.transition = "none"; el.style.transform = `translate(${dx}px,${dy}px)`;
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        el.style.transition = "transform .9s cubic-bezier(.22,.8,.25,1)"; el.style.transform = "";
+      }));
+    });
 
     const log = $("#log"); log.innerHTML = "";
     const names = Object.fromEntries(friends.map(f=>[f.id,f.name]));
@@ -544,32 +578,93 @@ section h2{font:600 .75rem var(--body);letter-spacing:.08em;text-transform:upper
         li.textContent = d===today ? "Today" : d===today-DAY ? "Yesterday" : new Date(d).toLocaleDateString(undefined,{weekday:"long",day:"numeric",month:"short"});
         log.append(li);
       }
-      const li = document.createElement("li"); li.className="entry";
+      const li = document.createElement("li"); li.className="entry"; li.tabIndex = 0;
       const tm = document.createElement("time"); tm.textContent = new Date(m.at).toLocaleTimeString(undefined,{hour:"2-digit",minute:"2-digit"});
       const who = document.createElement("span"); who.className="who"; who.textContent = names[m.friendId] || "Removed friend";
       const note = document.createElement("span"); note.className="note"; note.textContent = m.note || "";
       li.append(tm, who, note);
-      if(editing){
-        const x = document.createElement("button"); x.className="link danger x"; x.textContent="Delete";
-        x.onclick = () => write({t:"delete", path:"moments/"+m.id});
-        li.append(x);
-      }
+      li.onclick = () => openMomentSheet(m.id);
+      li.onkeydown = e => { if(e.key==="Enter") openMomentSheet(m.id); };
+      li.oncontextmenu = e => { e.preventDefault(); openMomentSheet(m.id); };
       log.append(li);
     });
   }
+  const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-  $("#editBtn").onclick = () => {
-    editing = !editing;
-    $("#editBtn").setAttribute("aria-pressed", editing); $("#editBtn").textContent = editing ? "Done" : "Edit";
-    render();
-  };
+  // tap = onTap; long-press (touch) or right-click (mouse) = onHold
+  function holdable(el, onTap, onHold){
+    let timer = null, heldAt = 0, sx = 0, sy = 0;
+    const cancel = () => { clearTimeout(timer); timer = null; };
+    const hold = () => { cancel(); heldAt = Date.now(); if(navigator.vibrate) try{navigator.vibrate(18)}catch{} onHold(); };
+    el.addEventListener("pointerdown", e => { if(e.button) return; sx = e.clientX; sy = e.clientY; cancel(); timer = setTimeout(hold, 480); });
+    el.addEventListener("pointermove", e => { if(timer && Math.hypot(e.clientX-sx, e.clientY-sy) > 10) cancel(); });
+    ["pointerup","pointercancel","pointerleave"].forEach(t => el.addEventListener(t, cancel));
+    el.addEventListener("contextmenu", e => { e.preventDefault(); if(Date.now()-heldAt > 700) hold(); });
+    el.addEventListener("click", e => { if(Date.now()-heldAt < 700){ e.preventDefault(); return; } onTap(e); });
+  }
 
-  // keyboard: 1–9 logs that friend
+  // ---- hold-to-edit sheet ----
+  const sheet = $("#sheet"), sheetForm = $("#sheetForm");
+  // tap the backdrop to close; ignore the click that lands there when the long-press finger lifts
+  let sheetOpenedAt = 0, downOnBackdrop = false;
+  sheet.addEventListener("pointerdown", e => { downOnBackdrop = e.target === sheet; });
+  sheet.addEventListener("click", e => { if(e.target === sheet && downOnBackdrop && Date.now() - sheetOpenedAt > 400) sheet.close(); });
+  function openSheet(build){
+    sheetForm.innerHTML = ""; build(sheetForm); sheetOpenedAt = Date.now(); downOnBackdrop = false;
+    if(!sheet.open){ try{ sheet.showModal(); }catch{ sheet.setAttribute("open",""); } }
+  }
+  const el_ = (tag, props={}, ...kids) => { const e = Object.assign(document.createElement(tag), props); e.append(...kids); return e; };
+  function armed(btn, label, armedLabel, fn){
+    btn.textContent = label;
+    btn.onclick = e => { e.preventDefault(); if(btn.dataset.armed){ fn(); return; } btn.dataset.armed = 1; btn.textContent = armedLabel;
+      setTimeout(() => { delete btn.dataset.armed; btn.textContent = label; }, 3000); };
+    return btn;
+  }
+
+  function openFriendSheet(fid){
+    const f = state.friends[fid]; if(!f) return;
+    const hue = hueMap(Object.entries(state.friends).map(([id,x])=>({id,...x})))[fid];
+    openSheet(form => {
+      const pic = el_("button", {type:"button", className:"orbbtn" + (f.photo ? " has" : "")});
+      if(f.photo) pic.style.backgroundImage = `url("${f.photo}")`; else { pic.textContent = "Add photo"; pic.style.borderColor = `hsl(${hue} 50% 60%)`; }
+      pic.onclick = () => pickPhoto(fid);
+      const name = el_("input", {className:"title", value:f.name, ariaLabel:"Name", autocomplete:"off"});
+      const saveName = () => { const v = name.value.trim(); if(v && v !== state.friends[fid]?.name) write({t:"update", path:"friends/"+fid, data:{name:v}}); };
+      name.onchange = saveName; name.onkeydown = e => { if(e.key==="Enter"){ e.preventDefault(); saveName(); sheet.close(); } };
+      const top = el_("div", {className:"top"}, pic, name);
+      const links = el_("div", {className:"row"});
+      links.append(el_("button", {type:"button", className:"link", textContent: f.photo ? "Change photo" : "Choose photo", onclick:()=>pickPhoto(fid)}));
+      if(f.photo) links.append(el_("button", {type:"button", className:"link", textContent:"Remove photo",
+        onclick:()=>{ write({t:"update", path:"friends/"+fid, data:{photo:null}}); openFriendSheet(fid); }}));
+      const count = Object.values(state.moments).filter(m=>m.friendId===fid).length;
+      const hint = el_("p", {className:"hint", textContent: count ? `${count} moment${count>1?"s":""} so far.` : "No moments yet."});
+      const rm = armed(el_("button", {type:"button", className:"link danger"}), `Remove ${f.name}`, "Tap again to remove",
+        () => { write({t:"delete", path:"friends/"+fid}); sheet.close(); });
+      const done = el_("button", {type:"submit", className:"btn primary", textContent:"Done", onclick:saveName});
+      form.append(top, links, hint, el_("div", {className:"actions"}, rm, done));
+    });
+  }
+
+  function openMomentSheet(mid){
+    const m = state.moments[mid]; if(!m) return;
+    const who = state.friends[m.friendId]?.name || "Removed friend";
+    const when = new Date(m.at).toLocaleString(undefined, {weekday:"short", day:"numeric", month:"short", hour:"2-digit", minute:"2-digit"});
+    openSheet(form => {
+      const title = el_("div", {}, el_("strong", {textContent:who, style:"font:700 1.2rem var(--display)"}), el_("p", {className:"hint", textContent:when}));
+      const note = el_("textarea", {value:m.note || "", placeholder:"What came up?", ariaLabel:"Note"});
+      const save = () => { const v = note.value.trim(), cur = state.moments[mid]; if(cur && v !== (cur.note||"")) write({t:"set", path:"moments/"+mid, data:{...cur, note:v || null}}); };
+      const del = armed(el_("button", {type:"button", className:"link danger"}), "Delete this moment", "Tap again to delete",
+        () => { write({t:"delete", path:"moments/"+mid}); sheet.close(); });
+      form.append(title, note, el_("div", {className:"actions"}, del, el_("button", {type:"submit", className:"btn primary", textContent:"Save", onclick:save})));
+    });
+  }
+
+  // keyboard: 1–9 logs that bubble, in the order shown
   addEventListener("keydown", e => {
-    if(editing || e.metaKey || e.ctrlKey || e.altKey || !$("#show").hidden) return;
+    if(e.metaKey || e.ctrlKey || e.altKey || !$("#show").hidden || sheet.open) return;
     if(/^(INPUT|TEXTAREA)$/.test(document.activeElement?.tagName)) return;
     const n = parseInt(e.key,10); if(!(n>=1 && n<=9)) return;
-    [...document.querySelectorAll("#grid button.tile")][n-1]?.click();
+    [...document.querySelectorAll("#grid .bub[data-id]")][n-1]?.click();
   });
 
   // ---- backup / restore ----
@@ -717,7 +812,6 @@ section h2{font:600 .75rem var(--body);letter-spacing:.08em;text-transform:upper
   }
 
   // ---- bubble show ----
-  const HUES = [200, 330, 42, 160, 270, 12, 95, 235, 300, 180];
   const SPANS = {week:{label:"Week", days:7, phrase:"this week"}, month:{label:"Month", days:30, phrase:"this month"},
                  year:{label:"Year", days:365, phrase:"this year"}, all:{label:"All time", days:null, phrase:null}};
   const show = $("#show"), sky = $("#sky"), ctx = sky.getContext("2d");
