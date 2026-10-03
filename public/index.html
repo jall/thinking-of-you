@@ -606,23 +606,37 @@ section h2{font:600 .75rem var(--body);letter-spacing:.08em;text-transform:upper
     const box = $("#account"); box.innerHTML = "";
     $("#privacy").textContent = mode==="sync" ? PRIVACY_SYNC : PRIVACY_LOCAL;
     if(!sb) return;
+    const link = (text, fn, cls) => { const b = document.createElement("button"); b.className = "link" + (cls ? " "+cls : ""); b.type = "button"; b.textContent = text; b.onclick = fn; return b; };
     if(mode==="sync"){
       const row = document.createElement("div"); row.className = "row";
       const who = document.createElement("span"); who.textContent = "Signed in as " + (user.email || "you");
-      const out = document.createElement("button"); out.className = "link"; out.textContent = "Sign out";
-      out.onclick = async () => { await sb.auth.signOut().catch(()=>{}); leaveSync(); status("Signed out. Showing what's saved on this device."); };
-      row.append(who, out); box.append(row); return;
+      row.append(who,
+        link("Sign in another device", makePairLink),
+        link("Sign out", async () => { await sb.auth.signOut().catch(()=>{}); leaveSync(); status("Signed out. Showing what's saved on this device."); }));
+      box.append(row);
+      if(pairUrl){
+        const form = document.createElement("form"); form.onsubmit = e => e.preventDefault();
+        const inp = document.createElement("input"); inp.readOnly = true; inp.value = pairUrl; inp.onfocus = () => inp.select();
+        const copy = document.createElement("button"); copy.className = "btn"; copy.type = "button"; copy.textContent = "Copy";
+        copy.onclick = async () => { try{ await navigator.clipboard.writeText(pairUrl); copy.textContent = "Copied"; }catch{ inp.select(); } };
+        form.append(inp, copy);
+        if(navigator.share) form.append(link("Share", () => navigator.share({url:pairUrl}).catch(()=>{})));
+        const note = document.createElement("p"); note.style.margin = "0";
+        note.textContent = "Open this on the other device, or paste it into its sign-in box (that's the way in for a home-screen app). Works once, for an hour.";
+        box.append(form, note);
+      }
+      return;
     }
     if(!signInStep){
-      const b = document.createElement("button"); b.className = "link"; b.textContent = "Sync across devices: sign in with email";
-      b.onclick = () => { signInStep = "email"; renderAccount(); $("#acctEmail")?.focus(); };
-      box.append(b); return;
+      const row = document.createElement("div"); row.className = "row";
+      row.append(link("Sync across devices: sign in with email", () => { signInStep = "email"; renderAccount(); $("#acctEmail")?.focus(); }),
+                 link("I have a sign-in link", () => { signInStep = "code"; renderAccount(); $("#acctCode")?.focus(); }));
+      box.append(row); return;
     }
     const form = document.createElement("form");
     const inp = document.createElement("input");
     const go = document.createElement("button"); go.className = "btn"; go.type = "submit";
-    const cancel = document.createElement("button"); cancel.className = "link"; cancel.type = "button"; cancel.textContent = "Cancel";
-    cancel.onclick = () => { signInStep = null; renderAccount(); };
+    const cancel = link("Cancel", () => { signInStep = null; renderAccount(); });
     if(signInStep==="email"){
       inp.type = "email"; inp.id = "acctEmail"; inp.placeholder = "you@example.com"; inp.autocomplete = "email"; inp.required = true; inp.value = signInEmail;
       go.textContent = "Email me a link";
@@ -630,34 +644,60 @@ section h2{font:600 .75rem var(--body);letter-spacing:.08em;text-transform:upper
         e.preventDefault(); signInEmail = inp.value.trim(); go.disabled = true; status("Sending…");
         const {error} = await sb.auth.signInWithOtp({email:signInEmail, options:{emailRedirectTo: location.origin + location.pathname}});
         go.disabled = false;
-        if(error){ status(error.message || "Couldn't send the email. Try again."); return; }
+        if(error){
+          status(/rate limit/i.test(error.message||"")
+            ? "Too many sign-in emails this hour. If another device is already signed in, use “Sign in another device” there instead."
+            : (error.message || "Couldn't send the email. Try again."));
+          return;
+        }
         status(`Sent to ${signInEmail}. Tap the link in the email, or on a home-screen app, long-press it, copy, and paste it here.`);
         signInStep = "code"; renderAccount(); $("#acctCode")?.focus();
       };
     } else {
-      inp.id = "acctCode"; inp.autocomplete = "one-time-code"; inp.placeholder = "Paste the email's link here"; inp.required = true;
+      inp.id = "acctCode"; inp.autocomplete = "one-time-code"; inp.placeholder = "Paste a sign-in link"; inp.required = true;
       go.textContent = "Sign in";
       form.onsubmit = async e => {
         e.preventDefault(); go.disabled = true; status("Checking…");
-        // Accept the sign-in link itself (long-press it in the email, copy, paste here) so a
-        // home-screen app can sign in without the link opening Safari. A 6-digit code works too.
-        const v = inp.value.trim();
-        let args = {email:signInEmail, token:v.replace(/\s/g,""), type:"email"};
-        try{
-          const u = new URL(v), th = u.searchParams.get("token_hash") || u.searchParams.get("token");
-          if(th) args = {token_hash:th, type:u.searchParams.get("type")==="signup" ? "signup" : "magiclink"};
-        }catch{}
-        const {data, error} = await sb.auth.verifyOtp(args);
+        const ok = await verifyPasted(inp.value);
         go.disabled = false;
-        if(error){ status("That didn't work. Links only work once and expire after an hour, so send a new one if needed."); return; }
-        signInStep = null; status(""); enterSync(data.user);
+        if(ok){ signInStep = null; status(""); }
       };
     }
     form.append(inp, go, cancel); box.append(form);
   }
 
+  // Accepts: a link from "Sign in another device" (…#pair=<hash>), the link from the email
+  // (…/verify?token=<hash>&type=…, long-pressed and copied so it doesn't open in Safari),
+  // a bare token hash, or a 6-digit code.
+  async function verifyPasted(raw){
+    const v = raw.trim();
+    let args = null;
+    try{
+      const u = new URL(v), pair = new URLSearchParams(u.hash.slice(1)).get("pair");
+      const th = pair || u.searchParams.get("token_hash") || u.searchParams.get("token");
+      if(th) args = {token_hash:th, type:u.searchParams.get("type")==="signup" ? "signup" : "magiclink"};
+    }catch{}
+    if(!args && /^[0-9a-f]{32,}$/i.test(v)) args = {token_hash:v, type:"magiclink"};
+    if(!args && /^\d{6,8}$/.test(v.replace(/\s/g,"")) && signInEmail) args = {email:signInEmail, token:v.replace(/\s/g,""), type:"email"};
+    if(!args){ status("That doesn't look like a sign-in link."); return false; }
+    const {data, error} = await sb.auth.verifyOtp(args);
+    if(error){ status("That link didn't work. Each one works once and expires after an hour."); return false; }
+    await enterSync(data.user); return true;
+  }
+
+  let pairUrl = "";
+  async function makePairLink(){
+    status("Making a link…");
+    const {data, error} = await sb.functions.invoke("pair", {method:"POST"});
+    if(error || !data?.token_hash){ status("Couldn't make a link. Check you're online and try again."); return; }
+    pairUrl = `${location.origin}/#pair=${data.token_hash}`; status(""); renderAccount();
+  }
+
   async function startAuth(){
     if(!window.supabase || SUPABASE_URL.startsWith("__")) return;
+    // a "Sign in another device" link opened here
+    const pairHash = new URLSearchParams(location.hash.slice(1)).get("pair");
+    if(pairHash) history.replaceState(null, "", location.pathname + location.search);
     sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {auth:{persistSession:true, autoRefreshToken:true, detectSessionInUrl:true}});
     // show cached synced data straight away (works offline) while the session is confirmed
     const cached = lsGet(SYNC, null);
@@ -666,6 +706,10 @@ section h2{font:600 .75rem var(--body);letter-spacing:.08em;text-transform:upper
       if(session?.user && (mode!=="sync" || !user?.email || user.id!==session.user.id)) setTimeout(() => enterSync(session.user), 0);
       if(ev==="SIGNED_OUT" && mode==="sync") leaveSync();
     });
+    if(pairHash){
+      status("Signing in…");
+      if(await verifyPasted(location.origin + "/#pair=" + pairHash)){ status("Signed in on this device."); renderAccount(); return; }
+    }
     const {data} = await sb.auth.getSession();
     if(data.session?.user){ await enterSync(data.session.user); }
     else if(cached?.userId && navigator.onLine){ leaveSync(); }
