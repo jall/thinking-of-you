@@ -88,6 +88,15 @@ dialog.sheet::backdrop{background:rgba(20,22,30,.35)}
 .sheet .hint{font-size:.82rem;color:var(--muted);margin:0}
 .sheet .actions{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
 .sheet .btn.primary{color:var(--bg);background:var(--fg);border-color:var(--fg)}
+.sheet .picks{display:flex;flex-wrap:wrap;gap:8px;max-height:40vh;overflow:auto}
+.sheet .pick{display:inline-flex;align-items:center;gap:7px;font:500 .9rem var(--body);color:var(--fg);background:var(--bg);border:1px solid var(--line);border-radius:999px;padding:4px 12px 4px 4px;cursor:pointer}
+.sheet .pick .dot{width:26px;height:26px;border-radius:50%;display:grid;place-items:center;font:700 .8rem var(--display);
+  background:hsl(var(--h,40) var(--osat) var(--o2));color:hsl(var(--h,40) 45% var(--oink));border:1px solid hsl(var(--h,40) 50% var(--oedge) / .8)}
+.sheet .pick[data-id="new"] .dot{background:transparent;border-style:dashed;color:var(--muted)}
+.sheet .pick[aria-pressed="true"]{border-color:var(--fg);box-shadow:0 0 0 1px var(--fg)}
+.sheet .check{display:flex;gap:8px;align-items:center;cursor:pointer}
+.sheet .check input{width:auto;margin:0}
+.sheet .btn:disabled{opacity:.4}
 .entry{cursor:pointer;-webkit-touch-callout:none}
 .entry:hover .who{text-decoration:underline;text-underline-offset:3px}
 .row{display:flex;gap:8px;flex-wrap:wrap}
@@ -454,21 +463,73 @@ section h2{font:600 .75rem var(--body);letter-spacing:.08em;text-transform:upper
     const log = (id, note) => { logThought(id); if(note) addNoteTo(id, note); };
     if(r.best) return log(r.best.id, noteParam || r.best.note);
 
-    // not sure who: offer the closest friends (keeping the note), or adding someone new
-    const t = $("#toast"); clearTimeout(toastTimer); t.innerHTML = "";
-    const heard = (text ?? friendParam).trim();
-    t.append(el_("span", {textContent:`Who was “${heard.length > 28 ? heard.slice(0,28) + "…" : heard}”?`}));
-    r.candidates.forEach(c => t.append(el_("button", {textContent:c.name, onclick:() => { t.classList.remove("on"); log(c.id, noteParam || c.note); }})));
-    const guess = (r.guess || "").split(" ")[0];
-    if(guess){
-      const name = guess.replace(/^\w/, c => c.toUpperCase());
-      t.append(el_("button", {textContent:`Add ${name}`, onclick:() => {
-        t.classList.remove("on"); addFriend(name);
-        const nf = Object.entries(state.friends).find(([,x]) => x.name===name);
-        if(nf) log(nf[0], noteParam || heard.split(/\s+/).slice(1).join(" "));
-      }}));
-    }
-    t.classList.add("on"); toastTimer = setTimeout(() => t.classList.remove("on"), 20000);
+    openWhoSheet((text ?? friendParam).trim(), r, noteParam);
+  }
+
+  // Siri wasn't sure who: pick anyone (closest first) or add someone new, fix the note, and
+  // optionally remember what was heard as a nickname so it matches next time.
+  function openWhoSheet(heardText, r, noteParam){
+    const friends = Object.entries(state.friends).map(([id,f])=>({id,...f}));
+    const hue = hueMap(friends);
+    const info = Object.fromEntries((r.ranked || []).map(c => [c.id, c]));
+    const order = [...(r.ranked || []).map(c => c.id), ...friends.map(f=>f.id).filter(id => !info[id])];
+    const firstWord = heardText.split(/\s+/)[0] || "";
+    const guessName = firstWord.replace(/[,.:;!?]+$/, "").replace(/^\w/, c => c.toUpperCase());
+    let pick = r.candidates?.[0]?.id || null, noteTouched = !!noteParam;
+    const noteFor = id => noteParam || (id === "new" ? heardText.split(/\s+/).slice(1).join(" ") : info[id]?.note ?? heardText);
+
+    openSheet(form => {
+      const head = el_("div", {tabIndex:-1, autofocus:true, style:"outline:none"}, el_("strong", {textContent:"Who was it?", style:"font:700 1.2rem var(--display)"}),
+        el_("p", {className:"hint", textContent:`Heard: “${heardText}”`}));
+      const picks = el_("div", {className:"picks"});
+      const newName = el_("input", {value:guessName, placeholder:"Name", ariaLabel:"New person's name", hidden:true});
+      const note = el_("textarea", {placeholder:"What came up?", ariaLabel:"Note"});
+      note.oninput = () => { noteTouched = true; };
+      const remember = el_("input", {type:"checkbox", checked:true});
+      const rememberRow = el_("label", {className:"hint check"}, remember, el_("span"));
+      const save = el_("button", {type:"submit", className:"btn primary", textContent:"Save"});
+
+      const select = id => {
+        pick = id;
+        picks.querySelectorAll(".pick").forEach(b => b.setAttribute("aria-pressed", b.dataset.id === id));
+        newName.hidden = id !== "new";
+        if(!noteTouched) note.value = id ? noteFor(id) : heardText;
+        const heard = id && id !== "new" ? (info[id]?.heard || firstWord) : "";
+        const f = state.friends[id];
+        const already = f && (f.name.toLowerCase() === heard.toLowerCase() || (f.aliases||"").toLowerCase().split(/\s*,\s*/).includes(heard.toLowerCase()));
+        rememberRow.hidden = !heard || already;
+        rememberRow.lastChild.textContent = f ? `Remember “${heard}” as a nickname for ${f.name}` : "";
+        rememberRow.dataset.heard = heard;
+        save.disabled = !id;
+        if(id === "new") newName.focus();
+      };
+      const chip = (id, label, h) => {
+        const b = el_("button", {type:"button", className:"pick"}); b.dataset.id = id;
+        if(h != null) b.style.setProperty("--h", h);
+        b.append(el_("span", {className:"dot", textContent: id === "new" ? "+" : ([...label][0] || "?").toUpperCase()}), el_("span", {textContent:label}));
+        b.onclick = () => select(id); return b;
+      };
+      order.forEach(id => { const f = state.friends[id]; if(f) picks.append(chip(id, f.name, hue[id])); });
+      picks.append(chip("new", "New", null));
+
+      save.onclick = e => {
+        if(!pick){ e.preventDefault(); return; }
+        let id = pick;
+        if(id === "new"){
+          const name = newName.value.trim(); if(!name){ e.preventDefault(); newName.focus(); return; }
+          addFriend(name); id = Object.entries(state.friends).find(([,x]) => x.name === name)?.[0];
+          if(!id) return;
+        } else if(!rememberRow.hidden && remember.checked && rememberRow.dataset.heard){
+          const f = state.friends[id], list = (f.aliases ? f.aliases.split(/\s*,\s*/) : []).concat(rememberRow.dataset.heard);
+          write({t:"update", path:"friends/"+id, data:{aliases:list.join(", ")}});
+        }
+        logThought(id);
+        const v = note.value.trim(); if(v) addNoteTo(id, v);
+      };
+      const cancel = el_("button", {type:"button", className:"link", textContent:"Cancel", onclick:() => sheet.close()});
+      form.append(head, picks, newName, note, rememberRow, el_("div", {className:"actions"}, cancel, save));
+      select(pick);
+    });
   }
   function addNoteTo(fid, note){
     const last = Object.entries(state.moments).filter(([,m])=>m.friendId===fid).sort((a,b)=>b[1].at-a[1].at)[0];

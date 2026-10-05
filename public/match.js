@@ -67,6 +67,8 @@
     return {
       best: confident ? {id:top.id, score:top.score, note:noteFor(top.k)} : null,
       candidates: scored.filter(c => c.score >= .4).slice(0, 3).map(c => ({id:c.id, name:c.name, score:c.score, note:noteFor(c.kc)})),
+      // every friend, best first, with how the text would split if it were them (heard = the words taken as their name)
+      ranked: scored.map(c => ({id:c.id, name:c.name, score:c.score, note:noteFor(c.kc), heard:rawWords.slice(0, c.kc).join(" ").replace(/[,.:;!?]+$/, "")})),
       guess: words.slice(0, 2).join(" "),
     };
   };
