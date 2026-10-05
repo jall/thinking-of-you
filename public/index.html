@@ -222,6 +222,7 @@ section h2{font:600 .75rem var(--body);letter-spacing:.08em;text-transform:upper
 </div>
 
 <script src="vendor/supabase-2.117.2.js"></script>
+<script src="match.js"></script>
 <script>
 (() => {
   const $ = s => document.querySelector(s);
@@ -289,7 +290,7 @@ section h2{font:600 .75rem var(--body);letter-spacing:.08em;text-transform:upper
   if(navigator.storage?.persist) navigator.storage.persist().catch(()=>{});
 
   // ---- sync (Supabase) ----
-  const COLS = {friends:{name:"name", order:"ord", photo:"photo", lastAt:"last_at", createdAt:"created_at"},
+  const COLS = {friends:{name:"name", order:"ord", photo:"photo", lastAt:"last_at", createdAt:"created_at", aliases:"aliases"},
                 moments:{friendId:"friend_id", at:"at", note:"note"}};
   const toRow = (col, data) => { const r = {}; for(const [k,v] of Object.entries(data)) if(COLS[col][k]) r[COLS[col][k]] = v ?? null; return r; };
   const fromRow = (col, row) => { const d = {}; for(const [k,c] of Object.entries(COLS[col])) if(row[c] != null) d[k] = row[c]; return d; };
@@ -441,43 +442,33 @@ section h2{font:600 .75rem var(--body);letter-spacing:.08em;text-transform:upper
     }catch{ status("Couldn't read that photo. Try a JPEG or PNG."); }
   };
 
-  // quick log from a link, e.g. a Siri Shortcut opening ?thought=sophie, wondering how her exam went
-  // (also accepts ?friend=sophie&note=...). Matches names case-insensitively, then by first word / prefix.
+  // quick log from a link, e.g. a Siri Shortcut opening ?thought=sofs wondering how her exam went
+  // (also ?friend=sophie&note=...). Names are matched by sound as well as spelling (see match.js).
   function quickLog(){
     const q = new URLSearchParams(location.search);
-    let who = q.get("friend"), note = q.get("note") || "";
-    const raw = q.get("thought");
-    if(raw != null && !who){
-      const m = raw.trim().replace(/^(i'?m\s+)?thinking (of|about)\s+/i, "").match(/^([^,.:;\-–—]+)[,.:;\-–—]?\s*(.*)$/s);
-      if(m){ who = m[1]; note = note || m[2]; }
-    }
-    if(!who) return;
+    const text = q.get("thought"), friendParam = q.get("friend"), noteParam = (q.get("note") || "").trim();
+    if(text == null && friendParam == null) return;
     history.replaceState(null, "", location.pathname);
-    who = who.trim().toLowerCase(); note = note.trim();
     const fs = Object.entries(state.friends).map(([id,f])=>({id,...f}));
-    const norm = s => s.toLowerCase().trim();
-    // longest-name-first so "Sam" doesn't win over "Sam K" when both exist
-    const byLen = [...fs].sort((a,b)=>b.name.length-a.name.length);
-    let f = fs.find(f => norm(f.name)===who)
-      || byLen.find(f => who.startsWith(norm(f.name)+" "))
-      || fs.find(f => norm(f.name).split(/\s+/)[0]===who.split(/\s+/)[0])
-      || (who.length>=3 && fs.find(f => norm(f.name).startsWith(who)));
-    if(f && !note && who.startsWith(norm(f.name)+" ")) note = who.slice(norm(f.name).length).trim();
-    if(!f){
-      const t = $("#toast"); t.innerHTML = "";
-      const msg = document.createElement("span"); msg.textContent = `No friend called “${who}”`;
-      const add = document.createElement("button"); add.textContent = "Add them";
-      add.onclick = () => {
-        const name = who.replace(/\b\w/g, c => c.toUpperCase());
-        addFriend(name);
+    const r = window.matchThought ? window.matchThought(friendParam ?? text, fs) : {best:null, candidates:[], guess:""};
+    const log = (id, note) => { logThought(id); if(note) addNoteTo(id, note); };
+    if(r.best) return log(r.best.id, noteParam || r.best.note);
+
+    // not sure who: offer the closest friends (keeping the note), or adding someone new
+    const t = $("#toast"); clearTimeout(toastTimer); t.innerHTML = "";
+    const heard = (text ?? friendParam).trim();
+    t.append(el_("span", {textContent:`Who was “${heard.length > 28 ? heard.slice(0,28) + "…" : heard}”?`}));
+    r.candidates.forEach(c => t.append(el_("button", {textContent:c.name, onclick:() => { t.classList.remove("on"); log(c.id, noteParam || c.note); }})));
+    const guess = (r.guess || "").split(" ")[0];
+    if(guess){
+      const name = guess.replace(/^\w/, c => c.toUpperCase());
+      t.append(el_("button", {textContent:`Add ${name}`, onclick:() => {
+        t.classList.remove("on"); addFriend(name);
         const nf = Object.entries(state.friends).find(([,x]) => x.name===name);
-        if(nf){ logThought(nf[0]); if(note) addNoteTo(nf[0], note); }
-      };
-      t.append(msg, add); t.classList.add("on"); setTimeout(()=>t.classList.remove("on"), 8000);
-      return;
+        if(nf) log(nf[0], noteParam || heard.split(/\s+/).slice(1).join(" "));
+      }}));
     }
-    logThought(f.id);
-    if(note) addNoteTo(f.id, note);
+    t.classList.add("on"); toastTimer = setTimeout(() => t.classList.remove("on"), 20000);
   }
   function addNoteTo(fid, note){
     const last = Object.entries(state.moments).filter(([,m])=>m.friendId===fid).sort((a,b)=>b[1].at-a[1].at)[0];
@@ -531,7 +522,7 @@ section h2{font:600 .75rem var(--body);letter-spacing:.08em;text-transform:upper
     order.forEach((id,i) => {
       const f = s.friends[id]; if(!f) return;
       const week = moments.filter(m=>m.friendId===id && m.at >= today-6*DAY).length;
-      const size = Math.round((small ? 84 : 92) + (small ? 34 : 44) * Math.sqrt(warm[id]/maxW));
+      const size = Math.round((small ? 72 : 80) + (small ? 62 : 74) * Math.pow(warm[id]/maxW, .7));
       const el = document.createElement("button"); el.type = "button"; el.className = "bub"; el.dataset.id = id;
       el.style.cssText = `--h:${hue[id]};--s:${size}px;--dy:${Math.round(hash01(id)*14)}px;--bd:${(-hash01(id+"b")*7).toFixed(2)}s`;
       el.innerHTML = `<span class="orb">${f.photo?`<img alt="" draggable="false">`:`<span class="initial"></span>`}<span class="ripple"></span></span>
@@ -544,7 +535,7 @@ section h2{font:600 .75rem var(--body);letter-spacing:.08em;text-transform:upper
       grid.append(el);
     });
 
-    const add = document.createElement("div"); add.className = "bub add"; add.style.cssText = "--h:40;--s:" + (small ? 84 : 92) + "px";
+    const add = document.createElement("div"); add.className = "bub add"; add.style.cssText = "--h:40;--s:" + (small ? 76 : 84) + "px";
     const orb = document.createElement("span"); orb.className = "orb";
     const inp = document.createElement("input"); inp.id = "addInput"; inp.placeholder = "+ Add"; inp.setAttribute("aria-label","Add a friend"); inp.value = addVal;
     inp.onkeydown = e => { if(e.key==="Enter"){ const v=inp.value; inp.value=""; addFriend(v); setTimeout(()=>$("#addInput")?.focus(),0);} };
@@ -636,12 +627,15 @@ section h2{font:600 .75rem var(--body);letter-spacing:.08em;text-transform:upper
       links.append(el_("button", {type:"button", className:"link", textContent: f.photo ? "Change photo" : "Choose photo", onclick:()=>pickPhoto(fid)}));
       if(f.photo) links.append(el_("button", {type:"button", className:"link", textContent:"Remove photo",
         onclick:()=>{ write({t:"update", path:"friends/"+fid, data:{photo:null}}); openFriendSheet(fid); }}));
+      const nick = el_("input", {value:f.aliases || "", placeholder:"Nicknames, for Siri: Soph, Sofs", ariaLabel:"Nicknames", autocomplete:"off"});
+      const saveNick = () => { const v = nick.value.split(",").map(x=>x.trim()).filter(Boolean).join(", "); if(v !== (state.friends[fid]?.aliases || "")) write({t:"update", path:"friends/"+fid, data:{aliases:v || null}}); };
+      nick.onchange = saveNick;
       const count = Object.values(state.moments).filter(m=>m.friendId===fid).length;
       const hint = el_("p", {className:"hint", textContent: count ? `${count} moment${count>1?"s":""} so far.` : "No moments yet."});
       const rm = armed(el_("button", {type:"button", className:"link danger"}), `Remove ${f.name}`, "Tap again to remove",
         () => { write({t:"delete", path:"friends/"+fid}); sheet.close(); });
-      const done = el_("button", {type:"submit", className:"btn primary", textContent:"Done", onclick:saveName});
-      form.append(top, links, hint, el_("div", {className:"actions"}, rm, done));
+      const done = el_("button", {type:"submit", className:"btn primary", textContent:"Done", onclick:() => { saveName(); saveNick(); }});
+      form.append(top, links, nick, hint, el_("div", {className:"actions"}, rm, done));
     });
   }
 
